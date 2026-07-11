@@ -14,14 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { useWorkspace } from "@/components/workspace/workspace-provider";
-import type { ActionResult, Project, ProjectStatus, ProjectUpdate } from "@/lib/domain";
+import type { ActionResult, Project, ProjectUpdate } from "@/lib/domain";
 import { calculateProjectProgress } from "@/modules/planning/progress";
 import {
   buildTimelineMonths,
   DateCell,
   EmptyPlanningState,
   formatPlanningDate,
-  formatPriority,
   HealthBadge,
   MemberAvatar,
   Metric,
@@ -31,6 +30,7 @@ import {
   StatusBadge,
   timelineColumn,
 } from "./shared";
+import { ProjectBoard } from "./project-board";
 import type { PlanningRouteProps } from "./types";
 
 type ProjectLayout = "list" | "board" | "timeline";
@@ -44,14 +44,6 @@ const LAYOUT_OPTIONS = [
     icon: <GanttChartSquare size={13} strokeWidth={1.8} />,
   },
 ] as const;
-
-const BOARD_STATUSES: ProjectStatus[] = [
-  "planned",
-  "started",
-  "paused",
-  "completed",
-  "canceled",
-];
 
 function latestUpdatesByProject(updates: readonly ProjectUpdate[]): Map<string, ProjectUpdate> {
   const latest = new Map<string, ProjectUpdate>();
@@ -80,10 +72,6 @@ export function ProjectsHub({ onNavigate }: PlanningRouteProps) {
   const membershipByUser = useMemo(
     () => new Map(data.memberships.map((membership) => [membership.userId, membership])),
     [data.memberships],
-  );
-  const teamById = useMemo(
-    () => new Map(data.teams.map((team) => [team.id, team])),
-    [data.teams],
   );
   const progressByProject = useMemo(
     () =>
@@ -392,61 +380,11 @@ export function ProjectsHub({ onNavigate }: PlanningRouteProps) {
             </table>
           </div>
         ) : layout === "board" ? (
-          <div className="grid min-h-full auto-cols-[280px] grid-flow-col gap-3 overflow-x-auto p-4 sm:p-6">
-            {BOARD_STATUSES.map((status) => {
-              const projects = data.projects.filter((project) => project.status === status);
-              return (
-                <section key={status} aria-labelledby={`project-column-${status}`} className="min-w-0">
-                  <div className="mb-2 flex items-center justify-between px-1">
-                    <h2 id={`project-column-${status}`} className="text-xs font-medium text-secondary">
-                      {PROJECT_STATUS_LABELS[status]}
-                    </h2>
-                    <span className="font-mono text-[11px] text-tertiary">{projects.length}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {projects.map((project) => {
-                      const progress = progressByProject.get(project.id)!;
-                      const teamNames = project.teamIds
-                        .map((teamId) => teamById.get(teamId)?.name)
-                        .filter(Boolean)
-                        .join(", ");
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => openProject(project.id)}
-                          className="w-full rounded-md border border-border bg-surface p-3 text-left transition-colors hover:border-border-strong hover:bg-surface-hover active:translate-y-px"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <span className="line-clamp-2 text-sm font-medium leading-5 text-primary">
-                              {project.name}
-                            </span>
-                            <MemberAvatar membership={membershipByUser.get(project.leadId ?? "")} size="sm" />
-                          </div>
-                          <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-secondary">
-                            {project.summary || "暂无项目简介"}
-                          </p>
-                          <div className="mt-3 flex items-center gap-2">
-                            <ProgressBar value={progress.progress} label={`${project.name} 进度`} className="flex-1" />
-                            <span className="font-mono text-[11px] text-tertiary">{Math.round(progress.progress)}%</span>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-tertiary">
-                            <span className="truncate">{teamNames || "未关联团队"}</span>
-                            <span>{formatPriority(project.priority)}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                    {projects.length === 0 ? (
-                      <div className="rounded-md border border-dashed border-border px-3 py-8 text-center text-xs text-tertiary">
-                        暂无项目
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+          <ProjectBoard
+            projects={data.projects}
+            progressByProject={progressByProject}
+            onOpen={openProject}
+          />
         ) : (
           <div className="min-w-[900px] p-4 sm:p-6">
             <div
