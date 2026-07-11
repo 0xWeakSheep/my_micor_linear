@@ -22,9 +22,9 @@ import { closeDatabase, getDatabase, getOne } from "@/lib/db";
 import type { Issue, Membership, Project, Team } from "@/lib/domain";
 import { hashOpaqueToken } from "@/lib/security";
 
-const TEST_TOKEN = "orb_test_workspace_a";
-const READ_ONLY_TOKEN = "orb_test_read_only";
-const EXPIRED_TOKEN = "orb_test_expired";
+const TEST_TOKEN = "ml_test_workspace_a";
+const READ_ONLY_TOKEN = "ml_test_read_only";
+const EXPIRED_TOKEN = "ml_test_expired";
 const CREATED_AT = "2026-07-01T00:00:00.000Z";
 
 let temporaryDirectory = "";
@@ -38,7 +38,7 @@ function request(
     readonly method?: string;
   } = {},
 ): NextRequest {
-  return new NextRequest(`http://orbit.test${path}`, {
+  return new NextRequest(`http://micro-linear.test${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...init.headers },
   });
@@ -50,8 +50,8 @@ function insertFixture(): void {
     `INSERT INTO users(id, name, email, avatar_url, timezone, locale, created_at, updated_at)
      VALUES (?, ?, ?, NULL, 'UTC', 'en', ?, ?)`,
   );
-  insertUser.run("usr_actor", "API Actor", "actor@orbit.test", CREATED_AT, CREATED_AT);
-  insertUser.run("usr_other", "Other Member", "other@orbit.test", CREATED_AT, CREATED_AT);
+  insertUser.run("usr_actor", "API Actor", "actor@micro-linear.test", CREATED_AT, CREATED_AT);
+  insertUser.run("usr_other", "Other Member", "other@micro-linear.test", CREATED_AT, CREATED_AT);
 
   const insertWorkspace = database.prepare(
     `INSERT INTO workspaces(id, name, slug, icon, timezone, created_at, updated_at)
@@ -221,7 +221,7 @@ function insertFixture(): void {
     `INSERT INTO api_keys(
        id, workspace_id, user_id, name, prefix, token_hash, scopes_json,
        expires_at, created_at
-     ) VALUES (?, 'ws_a', 'usr_actor', ?, 'orb_test', ?, ?, ?, ?)`,
+     ) VALUES (?, 'ws_a', 'usr_actor', ?, 'ml_test', ?, ?, ?, ?)`,
   );
   insertApiKey.run(
     "key_full",
@@ -251,8 +251,8 @@ function insertFixture(): void {
 
 beforeAll(() => {
   closeDatabase();
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-api-v1-"));
-  vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "api-v1.db"));
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-api-v1-"));
+  vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "api-v1.db"));
   vi.stubEnv("AUTH_TOKEN_PEPPER", "api-v1-test-pepper");
   insertFixture();
 });
@@ -266,7 +266,7 @@ afterAll(() => {
 describe("REST API v1 authentication", () => {
   it("returns a stable JSON error envelope for a missing token", async () => {
     const response = await withApiV1(
-      new Request("http://orbit.test/api/v1/issues", {
+      new Request("http://micro-linear.test/api/v1/issues", {
         headers: { "X-Request-Id": "gateway-request-123" },
       }),
       "issues:read",

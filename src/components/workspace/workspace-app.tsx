@@ -402,7 +402,7 @@ function buildHeader({
           { id: "documents", label: "Documents", icon: FileText, href: href("documents") },
           { id: "document", label: document.title, current: true },
         ]
-      : [{ id: "section", label: sectionLabels[section] ?? "Orbit", current: true }];
+      : [{ id: "section", label: sectionLabels[section] ?? "Micro Linear", current: true }];
   let tabs: ShellTab[] = [];
   if (section === "my-issues") {
     tabs = ["assigned", "created", "subscribed", "activity"].map((tab) => ({
@@ -466,7 +466,7 @@ function UserFooter({ workspaceSlug }: { workspaceSlug: string }) {
   function toggleTheme() {
     const next = !document.documentElement.classList.contains("dark");
     document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("orbit-theme", next ? "dark" : "light");
+    localStorage.setItem("micro-linear-theme", next ? "dark" : "light");
   }
 
   async function logout() {

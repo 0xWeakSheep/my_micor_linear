@@ -3,8 +3,13 @@ import "server-only";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
+import { preferredEnvironmentValue } from "@/lib/runtime-config";
+
 function uploadRoot(): string {
-  const configured = process.env.ORBIT_UPLOAD_DIR?.trim();
+  const configured = preferredEnvironmentValue(
+    process.env.MICRO_LINEAR_UPLOAD_DIR,
+    process.env.ORBIT_UPLOAD_DIR,
+  );
   if (configured) {
     // This path is intentionally supplied at runtime and must not be included in
     // Next.js output-file tracing during a production build.

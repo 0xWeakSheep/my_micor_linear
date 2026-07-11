@@ -6,6 +6,8 @@ import {
   mkdtempSync,
   mkdirSync,
   openSync,
+  readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -26,7 +28,7 @@ const temporaryDirectories: string[] = [];
 const NOW = "2026-07-11T00:00:00.000Z";
 
 function temporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "orbit-backup-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "micro-linear-backup-test-"));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -56,7 +58,7 @@ function fixture(): {
   attachmentPath: string;
 } {
   const root = temporaryDirectory();
-  const databasePath = join(root, "orbit.db");
+  const databasePath = join(root, "micro-linear.db");
   const uploadDirectory = join(root, "uploads");
   const backupDirectory = join(root, "backups");
   const attachmentPath = join(uploadDirectory, "workspace_1", "file_1");
@@ -80,7 +82,7 @@ function fixture(): {
   database
     .prepare(
       `INSERT INTO workspaces(id, name, slug, icon, timezone, created_at, updated_at)
-       VALUES ('workspace_1', 'Orbit', 'orbit', 'O', 'UTC', ?, ?)`,
+       VALUES ('workspace_1', 'Micro Linear', 'micro-linear', 'M', 'UTC', ?, ?)`,
     )
     .run(NOW, NOW);
   database
@@ -120,7 +122,7 @@ describe("SQLite backup bundles", () => {
       tableCounts: { users: 1, workspaces: 1, files: 1 },
     });
     expect(backup.manifest.uploads).toMatchObject({ fileCount: 1, totalBytes: 18 });
-    expect(existsSync(join(backup.bundlePath, "orbit.sqlite"))).toBe(true);
+    expect(existsSync(join(backup.bundlePath, "micro-linear.sqlite"))).toBe(true);
     expect(existsSync(join(backup.bundlePath, "uploads/workspace_1/file_1"))).toBe(true);
     expect(listBackupBundles(paths.backupDirectory)).toMatchObject([
       { path: backup.bundlePath, valid: true, uploadFileCount: 1 },
@@ -186,5 +188,32 @@ describe("SQLite backup bundles", () => {
       }),
     ).rejects.toThrow(/referenced attachment is missing/i);
     expect(listBackupBundles(paths.backupDirectory)).toEqual([]);
+  });
+
+  it("continues to verify backup bundles created before the brand migration", async () => {
+    const paths = fixture();
+    const backup = await createBackupBundle({
+      databasePath: paths.databasePath,
+      uploadDirectory: paths.uploadDirectory,
+      backupDirectory: paths.backupDirectory,
+      now: new Date(NOW),
+    });
+    const manifestPath = join(backup.bundlePath, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      format: string;
+      database: { file: string };
+    };
+    renameSync(
+      join(backup.bundlePath, "micro-linear.sqlite"),
+      join(backup.bundlePath, "orbit.sqlite"),
+    );
+    manifest.format = "orbit-backup";
+    manifest.database.file = "orbit.sqlite";
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+    await expect(verifyBackupRestore(backup.bundlePath)).resolves.toMatchObject({
+      ok: true,
+      attachmentFilesVerified: 1,
+    });
   });
 });

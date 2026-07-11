@@ -137,7 +137,7 @@ export function CommandMenu({ workspaceSlug }: { workspaceSlug: string }) {
             <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border px-3 text-[10px] text-tertiary">
               <span className="inline-flex items-center gap-1"><kbd>↑↓</kbd> 导航</span>
               <span className="inline-flex items-center gap-1"><kbd>↵</kbd> 打开</span>
-              <span className="ml-auto inline-flex items-center gap-1"><Hash size={10} /> Orbit commands</span>
+              <span className="ml-auto inline-flex items-center gap-1"><Hash size={10} /> Micro Linear commands</span>
             </div>
           </CommandPrimitive>
         </Dialog.Content>

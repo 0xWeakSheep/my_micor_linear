@@ -79,13 +79,17 @@ export function WorkspaceProvider({
   const [createIssueOpen, setCreateIssueOpen] = useState(false);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const preferenceKey = `orbit:preferences:${initialData.workspace.id}`;
+  const preferenceKey = `micro-linear:preferences:${initialData.workspace.id}`;
+  const legacyPreferenceKey = `orbit:preferences:${initialData.workspace.id}`;
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const saved = localStorage.getItem(preferenceKey);
+      const saved =
+        localStorage.getItem(preferenceKey) ??
+        localStorage.getItem(legacyPreferenceKey);
       if (saved) {
+        localStorage.setItem(preferenceKey, saved);
         const next = {
           ...DEFAULT_PREFERENCES,
           ...(JSON.parse(saved) as Partial<WorkspacePreferences>),
@@ -98,7 +102,7 @@ export function WorkspaceProvider({
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [preferenceKey]);
+  }, [legacyPreferenceKey, preferenceKey]);
 
   const setPreferences = useCallback(
     (patch: Partial<WorkspacePreferences>) => {

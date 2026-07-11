@@ -21,7 +21,7 @@ describe("health request observability", () => {
   it("returns and propagates a safe request id", async () => {
     state.healthy = true;
     const response = GET(
-      new NextRequest("https://orbit.test/api/health", {
+      new NextRequest("https://micro-linear.test/api/health", {
         headers: { "X-Request-Id": "load-balancer-123" },
       }),
     );
@@ -34,7 +34,7 @@ describe("health request observability", () => {
   it("keeps request correlation on an unhealthy response", async () => {
     state.healthy = false;
     const response = GET(
-      new NextRequest("https://orbit.test/api/health", {
+      new NextRequest("https://micro-linear.test/api/health", {
         headers: { "X-Request-Id": "load-balancer-456" },
       }),
     );

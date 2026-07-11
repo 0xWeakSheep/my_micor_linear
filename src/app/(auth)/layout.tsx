@@ -1,4 +1,4 @@
-import { Orbit } from "lucide-react";
+import { Layers3 } from "lucide-react";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -9,9 +9,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <section className="relative z-10 m-auto w-full max-w-[420px] px-6 py-12 sm:px-8">
         <div className="mb-10 flex items-center justify-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-lg bg-accent text-white shadow-[0_8px_20px_color-mix(in_srgb,var(--accent)_30%,transparent)]">
-            <Orbit size={18} strokeWidth={2.2} aria-hidden="true" />
+            <Layers3 size={18} strokeWidth={2.2} aria-hidden="true" />
           </span>
-          <span className="text-[17px] font-semibold tracking-[-0.02em]">Orbit</span>
+          <span className="text-[17px] font-semibold tracking-[-0.02em]">Micro Linear</span>
         </div>
         <div className="rounded-xl border border-border bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] p-6 shadow-[var(--shadow-popover)] backdrop-blur-xl sm:p-8">
           {children}

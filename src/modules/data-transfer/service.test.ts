@@ -32,8 +32,8 @@ function fixture(): void {
 }
 
 beforeAll(() => {
-  directory = mkdtempSync(join(tmpdir(), "orbit-transfer-"));
-  process.env.ORBIT_DB_PATH = join(directory, "test.db");
+  directory = mkdtempSync(join(tmpdir(), "micro-linear-transfer-"));
+  process.env.MICRO_LINEAR_DB_PATH = join(directory, "test.db");
 });
 
 beforeEach(() => fixture());
@@ -41,14 +41,14 @@ beforeEach(() => fixture());
 afterAll(() => {
   closeDatabase();
   rmSync(directory, { recursive: true, force: true });
-  delete process.env.ORBIT_DB_PATH;
+  delete process.env.MICRO_LINEAR_DB_PATH;
 });
 
 describe("workspace data transfer", () => {
   it("exports a sanitized JSON snapshot", () => {
     const exported = exportWorkspaceData("ws_test", "usr_admin", { format: "json", scope: "workspace" });
     const snapshot = JSON.parse(exported.content) as { schema: string; data: { issues: unknown[] } };
-    expect(snapshot.schema).toBe("orbit.workspace.v1");
+    expect(snapshot.schema).toBe("micro-linear.workspace.v1");
     expect(snapshot.data.issues).toHaveLength(1);
     expect(exported.content).not.toContain("password_hash");
     expect(exported.filename).toMatch(/test-export-.*\.json/);

@@ -29,6 +29,7 @@ test-results/
 playwright-report/
 coverage/
 outputs/
+deploy/micro-linear.env
 deploy/orbit.env
 
 # debug

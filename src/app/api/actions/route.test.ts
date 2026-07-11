@@ -10,7 +10,7 @@ import { POST } from "./route";
 describe("action request observability", () => {
   it("adds request correlation to an early cross-site rejection", async () => {
     const response = await POST(
-      new NextRequest("https://orbit.test/api/actions", {
+      new NextRequest("https://micro-linear.test/api/actions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

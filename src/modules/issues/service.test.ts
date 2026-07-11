@@ -114,8 +114,8 @@ function fixture(): void {
 }
 
 beforeAll(() => {
-  directory = mkdtempSync(join(tmpdir(), "orbit-issues-"));
-  process.env.ORBIT_DB_PATH = join(directory, "test.db");
+  directory = mkdtempSync(join(tmpdir(), "micro-linear-issues-"));
+  process.env.MICRO_LINEAR_DB_PATH = join(directory, "test.db");
 });
 
 beforeEach(() => fixture());
@@ -123,7 +123,7 @@ beforeEach(() => fixture());
 afterAll(() => {
   closeDatabase();
   rmSync(directory, { recursive: true, force: true });
-  delete process.env.ORBIT_DB_PATH;
+  delete process.env.MICRO_LINEAR_DB_PATH;
 });
 
 describe("issue creation", () => {

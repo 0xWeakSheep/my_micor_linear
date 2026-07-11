@@ -11,14 +11,14 @@ describe("request identifiers", () => {
   it("preserves a safe upstream request id and rejects unsafe shapes", () => {
     expect(
       requestIdFor(
-        new Request("https://orbit.test/api/health", {
+        new Request("https://micro-linear.test/api/health", {
           headers: { "X-Request-Id": "edge_01J2Y5R0H72K" },
         }),
       ),
     ).toBe("edge_01J2Y5R0H72K");
 
     const generated = requestIdFor(
-      new Request("https://orbit.test/api/health", {
+      new Request("https://micro-linear.test/api/health", {
         headers: { "X-Request-Id": "short" },
       }),
     );
@@ -28,7 +28,7 @@ describe("request identifiers", () => {
   it("derives a request id from a valid traceparent", () => {
     expect(
       requestIdFor(
-        new Request("https://orbit.test/api/v1/issues", {
+        new Request("https://micro-linear.test/api/v1/issues", {
           headers: {
             traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
           },
@@ -73,7 +73,7 @@ describe("structured logging", () => {
     const entries: StructuredLogEntry[] = [];
     const times = [100, 112.345, 999];
     const observation = observeRequest(
-      new Request("https://orbit.test/api/actions?token=never-log-this", {
+      new Request("https://micro-linear.test/api/actions?token=never-log-this", {
         method: "POST",
         headers: { "X-Request-Id": "gateway-request-123" },
       }),

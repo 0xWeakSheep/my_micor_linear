@@ -126,8 +126,8 @@ function insertProject(projectId: string, name: string): void {
 }
 
 beforeAll(() => {
-  directory = mkdtempSync(join(tmpdir(), "orbit-planning-"));
-  process.env.ORBIT_DB_PATH = join(directory, "test.db");
+  directory = mkdtempSync(join(tmpdir(), "micro-linear-planning-"));
+  process.env.MICRO_LINEAR_DB_PATH = join(directory, "test.db");
 });
 
 beforeEach(() => fixture());
@@ -135,7 +135,7 @@ beforeEach(() => fixture());
 afterAll(() => {
   closeDatabase();
   rmSync(directory, { recursive: true, force: true });
-  delete process.env.ORBIT_DB_PATH;
+  delete process.env.MICRO_LINEAR_DB_PATH;
 });
 
 describe("project maintenance", () => {

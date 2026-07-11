@@ -1,11 +1,22 @@
 import { loadEnvConfig } from "@next/env";
 
+import {
+  preferredEnvironmentFlag,
+  preferredEnvironmentValue,
+} from "../src/lib/runtime-config";
+
 loadEnvConfig(process.cwd());
 
-const secretNames = [
-  "AUTH_PASSWORD_PEPPER",
-  "AUTH_TOKEN_PEPPER",
-  "ORBIT_WEBHOOK_ENCRYPTION_KEY",
+const secrets = [
+  { name: "AUTH_PASSWORD_PEPPER", value: process.env.AUTH_PASSWORD_PEPPER },
+  { name: "AUTH_TOKEN_PEPPER", value: process.env.AUTH_TOKEN_PEPPER },
+  {
+    name: "MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY",
+    value: preferredEnvironmentValue(
+      process.env.MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY,
+      process.env.ORBIT_WEBHOOK_ENCRYPTION_KEY,
+    ),
+  },
 ] as const;
 
 const errors: string[] = [];
@@ -35,8 +46,8 @@ if (!appUrlValue) {
   }
 }
 
-const configuredSecrets = secretNames.map((name) => {
-  const value = process.env[name]?.trim() ?? "";
+const configuredSecrets = secrets.map(({ name, value: rawValue }) => {
+  const value = rawValue?.trim() ?? "";
   if (value.length < 32) errors.push(`${name} must contain at least 32 characters.`);
   if (/replace[-_ ]?with|change[-_ ]?me|placeholder/i.test(value)) {
     errors.push(`${name} must not use a documented placeholder value.`);
@@ -48,17 +59,27 @@ if (configuredSecrets.every((value) => value.length >= 32) && new Set(configured
   errors.push("Authentication and webhook secrets must use independent values.");
 }
 
-if (process.env.ORBIT_DEMO_MODE === "1") {
-  errors.push("ORBIT_DEMO_MODE must not be enabled for a production start.");
+if (
+  preferredEnvironmentFlag(
+    process.env.MICRO_LINEAR_DEMO_MODE,
+    process.env.ORBIT_DEMO_MODE,
+  )
+) {
+  errors.push("MICRO_LINEAR_DEMO_MODE must not be enabled for a production start.");
 }
-if (process.env.ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST === "1") {
-  errors.push("ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST must not be enabled for a production start.");
+if (
+  preferredEnvironmentFlag(
+    process.env.MICRO_LINEAR_WEBHOOK_ALLOW_INSECURE_LOCALHOST,
+    process.env.ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST,
+  )
+) {
+  errors.push("MICRO_LINEAR_WEBHOOK_ALLOW_INSECURE_LOCALHOST must not be enabled for a production start.");
 }
 
 if (errors.length > 0) {
-  console.error("Orbit production configuration is unsafe:");
+  console.error("Micro Linear production configuration is unsafe:");
   for (const error of errors) console.error(`- ${error}`);
   process.exitCode = 1;
 } else {
-  console.log("Orbit production configuration validated.");
+  console.log("Micro Linear production configuration validated.");
 }

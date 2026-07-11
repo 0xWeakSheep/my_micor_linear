@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import type { ActionResult } from "@/lib/domain";
 import { getSessionByToken } from "@/lib/auth";
-import { SESSION_COOKIE_NAME } from "@/lib/security";
+import { readSessionCookie } from "@/lib/security";
 
 import type { AuthResponseData } from "../_shared";
 
@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  const session = getSessionByToken(readSessionCookie(request.cookies));
   if (!session) {
     return NextResponse.json<ActionResult>(
       { ok: false, error: "Authentication required." },

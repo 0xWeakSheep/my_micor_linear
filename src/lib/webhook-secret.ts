@@ -5,13 +5,19 @@ import {
   randomBytes,
 } from "node:crypto";
 
+import { preferredEnvironmentValue } from "@/lib/runtime-config";
+
 const VERSION = "v1";
 const DEVELOPMENT_VERSION = "v0";
-const AAD = Buffer.from("orbit:webhook-signing-secret:v1", "utf8");
+const AAD = Buffer.from("micro-linear:webhook-signing-secret:v1", "utf8");
+const LEGACY_AAD = Buffer.from("orbit:webhook-signing-secret:v1", "utf8");
 
 function keyMaterial(): string | null {
   return (
-    process.env.ORBIT_WEBHOOK_ENCRYPTION_KEY?.trim() ||
+    preferredEnvironmentValue(
+      process.env.MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY,
+      process.env.ORBIT_WEBHOOK_ENCRYPTION_KEY,
+    ) ||
     process.env.AUTH_TOKEN_PEPPER?.trim() ||
     null
   );
@@ -24,13 +30,13 @@ function encryptionKey(material: string): Buffer {
 /**
  * Encrypt a signing secret for storage. Development without a configured key
  * uses an explicit v0 encoding so local installs remain usable; production
- * deployments should always set ORBIT_WEBHOOK_ENCRYPTION_KEY.
+ * deployments should always set MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY.
  */
 export function sealWebhookSecret(secret: string): string {
   const material = keyMaterial();
   if (!material) {
     if (process.env.NODE_ENV === "production") {
-      throw new Error("ORBIT_WEBHOOK_ENCRYPTION_KEY is required in production.");
+      throw new Error("MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY is required in production.");
     }
     return `${DEVELOPMENT_VERSION}.${Buffer.from(secret, "utf8").toString("base64url")}`;
   }
@@ -60,21 +66,30 @@ export function unsealWebhookSecret(sealed: string): string {
   }
   const material = keyMaterial();
   if (!material) {
-    throw new Error("ORBIT_WEBHOOK_ENCRYPTION_KEY is required to decrypt webhook secrets.");
+    throw new Error("MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY is required to decrypt webhook secrets.");
   }
-  try {
+
+  const decrypt = (aad: Buffer): string => {
     const decipher = createDecipheriv(
       "aes-256-gcm",
       encryptionKey(material),
       Buffer.from(first, "base64url"),
     );
-    decipher.setAAD(AAD);
+    decipher.setAAD(aad);
     decipher.setAuthTag(Buffer.from(second, "base64url"));
     return Buffer.concat([
       decipher.update(Buffer.from(third, "base64url")),
       decipher.final(),
     ]).toString("utf8");
+  };
+
+  try {
+    return decrypt(AAD);
   } catch {
-    throw new Error("Webhook signing secret could not be decrypted with the configured key.");
+    try {
+      return decrypt(LEGACY_AAD);
+    } catch {
+      throw new Error("Webhook signing secret could not be decrypted with the configured key.");
+    }
   }
 }

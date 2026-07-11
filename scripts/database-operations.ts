@@ -21,7 +21,7 @@ interface Arguments {
 }
 
 function usage(): string {
-  return `Orbit database and upload backup operations.
+  return `Micro Linear database and upload backup operations.
 
 Usage:
   npm run db:backup -- [--destination <new-directory>]
@@ -30,9 +30,9 @@ Usage:
   npm run db:restore-verify -- --backup <backup-directory>
 
 Common options:
-  --database <path>       SQLite database (default ORBIT_DB_PATH)
-  --uploads <path>        Attachment root (default ORBIT_UPLOAD_DIR)
-  --backup-dir <path>     Backup root (default ORBIT_BACKUP_DIR)
+  --database <path>       SQLite database (default MICRO_LINEAR_DB_PATH)
+  --uploads <path>        Attachment root (default MICRO_LINEAR_UPLOAD_DIR)
+  --backup-dir <path>     Backup root (default MICRO_LINEAR_BACKUP_DIR)
   --help                  Show this message
 
 Backup options:

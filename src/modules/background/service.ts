@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { getDatabase, type Database } from "@/lib/db";
+import { preferredEnvironmentFlag } from "@/lib/runtime-config";
 import { createId } from "@/lib/security";
 import { unsealWebhookSecret } from "@/lib/webhook-secret";
 import { createNotification } from "@/modules/shared/notification";
@@ -1222,8 +1223,12 @@ async function deliverWebhookTarget(
       signal: controller.signal,
       headers: {
         "content-type": "application/json",
-        "user-agent": "Orbit-Webhooks/1.0",
+        "user-agent": "Micro-Linear-Webhooks/1.0",
         "idempotency-key": idempotencyKey,
+        "x-micro-linear-delivery": idempotencyKey,
+        "x-micro-linear-event": event.type,
+        "x-micro-linear-signature": `sha256=${signature}`,
+        // Retained for existing webhook consumers during the branding migration.
         "x-orbit-delivery": idempotencyKey,
         "x-orbit-event": event.type,
         "x-orbit-signature": `sha256=${signature}`,
@@ -1403,7 +1408,10 @@ export async function deliverOutboxWebhooks(
         allowInsecureLocalhost:
           process.env.NODE_ENV !== "production" &&
           (options.allowInsecureLocalhost ??
-            process.env.ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST === "1"),
+            preferredEnvironmentFlag(
+              process.env.MICRO_LINEAR_WEBHOOK_ALLOW_INSECURE_LOCALHOST,
+              process.env.ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST,
+            )),
       });
       if (processed.processed) result.processedEvents += 1;
       result.delivered += processed.delivered;

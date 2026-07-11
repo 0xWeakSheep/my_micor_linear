@@ -42,7 +42,7 @@ function seedWorkspace(database: DatabaseSync): void {
     .prepare(
       `INSERT INTO workspaces(
         id, name, slug, icon, timezone, settings_json, created_at, updated_at
-      ) VALUES ('workspace_1', 'Orbit', 'orbit', 'O', 'Asia/Shanghai', '{}', ?, ?)`,
+      ) VALUES ('workspace_1', 'Micro Linear', 'micro-linear', 'M', 'Asia/Shanghai', '{}', ?, ?)`,
     )
     .run(CREATED_AT, CREATED_AT);
   database
@@ -306,12 +306,12 @@ describe("webhook URL safety", () => {
       permanent: true,
     });
     await expect(
-      assertSafeWebhookUrl("https://hooks.example.com/orbit", {
+      assertSafeWebhookUrl("https://hooks.example.com/micro-linear", {
         resolveHost: async () => [{ address: "10.0.0.4", family: 4 }],
       }),
     ).rejects.toMatchObject({ permanent: true });
     await expect(
-      assertSafeWebhookUrl("https://hooks.example.com/orbit", {
+      assertSafeWebhookUrl("https://hooks.example.com/micro-linear", {
         resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       }),
     ).resolves.toMatchObject({ protocol: "https:", hostname: "hooks.example.com" });
@@ -339,7 +339,7 @@ describe("outbox webhook delivery", () => {
           events_json, is_active,
           created_by_id, created_at, updated_at
         ) VALUES (
-          'webhook_1', 'workspace_1', 'Build hook', 'https://hooks.example.com/orbit',
+          'webhook_1', 'workspace_1', 'Build hook', 'https://hooks.example.com/micro-linear',
           'derived-signing-key', ?, '["issue.created"]', 1, 'user_1', ?, ?
         )`,
       )
@@ -364,7 +364,9 @@ describe("outbox webhook delivery", () => {
     const fetchImplementation: typeof fetch = async (_input, init) => {
       requests += 1;
       idempotencyKeys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
-      signatures.push(new Headers(init?.headers).get("x-orbit-signature") ?? "");
+      const headers = new Headers(init?.headers);
+      signatures.push(headers.get("x-micro-linear-signature") ?? "");
+      expect(headers.get("x-orbit-signature")).toBe(headers.get("x-micro-linear-signature"));
       requestBodies.push(String(init?.body ?? ""));
       return requests === 1
         ? new Response("temporary", { status: 503 })

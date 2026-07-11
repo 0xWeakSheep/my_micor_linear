@@ -7,7 +7,7 @@ import {
 } from "@/lib/auth";
 import { getOne } from "@/lib/db";
 import type { ActionResult, Project } from "@/lib/domain";
-import { SESSION_COOKIE_NAME } from "@/lib/security";
+import { readSessionCookie } from "@/lib/security";
 import { listArchivedProjects } from "@/modules/planning/service";
 import { ResourceNotFoundError } from "@/modules/shared/mutation";
 
@@ -20,7 +20,7 @@ interface RouteContext {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { workspaceSlug } = await context.params;
     const workspace = getOne<{ id: string }>(

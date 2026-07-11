@@ -21,17 +21,17 @@ let temporaryDirectory = "";
 
 beforeAll(() => {
   closeDatabase();
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-auth-access-"));
-  vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "auth.db"));
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-auth-access-"));
+  vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "auth.db"));
 
   expect(isWorkspaceSignupAllowed()).toBe(true);
   const database = getDatabase();
   database.exec(`
     INSERT INTO users(id, name, email, timezone, locale, created_at, updated_at)
     VALUES
-      ('user_admin', 'Admin', 'admin@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
-      ('user_member', 'Member', 'member@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
-      ('user_guest', 'Guest', 'guest@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
+      ('user_admin', 'Admin', 'admin@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
+      ('user_member', 'Member', 'member@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
+      ('user_guest', 'Guest', 'guest@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO workspaces(id, name, slug, icon, timezone, settings_json, created_at, updated_at)
     VALUES ('workspace_access', 'Access', 'access', 'A', 'UTC', '{}', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO workspace_members(id, workspace_id, user_id, role, status, joined_at)
@@ -59,9 +59,9 @@ afterAll(() => {
 describe("workspace signup policy", () => {
   it("allows only the first workspace unless public signup is explicitly enabled", () => {
     expect(isWorkspaceSignupAllowed()).toBe(false);
-    vi.stubEnv("ORBIT_ALLOW_PUBLIC_SIGNUP", "1");
+    vi.stubEnv("MICRO_LINEAR_ALLOW_PUBLIC_SIGNUP", "1");
     expect(isWorkspaceSignupAllowed()).toBe(true);
-    vi.stubEnv("ORBIT_ALLOW_PUBLIC_SIGNUP", "0");
+    vi.stubEnv("MICRO_LINEAR_ALLOW_PUBLIC_SIGNUP", "0");
   });
 });
 

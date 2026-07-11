@@ -8,7 +8,7 @@ import {
   ensureSeedData,
   getBootstrapData,
 } from "@/lib/bootstrap";
-import { SESSION_COOKIE_NAME } from "@/lib/security";
+import { readSessionCookie } from "@/lib/security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, context: BootstrapRouteContext) 
     // This is intentionally before auth so a pristine local install is usable on its first request.
     ensureSeedData();
 
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) return errorResponse("Authentication required.", 401);
 
     const { workspaceSlug } = await context.params;

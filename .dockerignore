@@ -8,5 +8,6 @@ test-results
 playwright-report
 coverage
 .env*
+deploy/micro-linear.env
 deploy/orbit.env
 npm-debug.log*

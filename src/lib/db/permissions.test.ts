@@ -20,10 +20,10 @@ function permissions(path: string): number {
 
 describe("SQLite storage permissions", () => {
   it("keeps its directory, database, WAL, and shared-memory files private", () => {
-    temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-db-permissions-"));
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-db-permissions-"));
     const directory = join(temporaryDirectory, "private-data");
-    const databasePath = join(directory, "orbit.db");
-    vi.stubEnv("ORBIT_DB_PATH", databasePath);
+    const databasePath = join(directory, "micro-linear.db");
+    vi.stubEnv("MICRO_LINEAR_DB_PATH", databasePath);
 
     const database = getDatabase();
     database.exec("CREATE TABLE permission_probe(id TEXT PRIMARY KEY) STRICT");

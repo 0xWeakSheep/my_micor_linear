@@ -241,7 +241,7 @@ export function AppearanceSettings() {
     if (typeof document !== "undefined") {
       const dark = next === "dark" || (next === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
       document.documentElement.classList.toggle("dark", dark);
-      localStorage.setItem("orbit-theme", next);
+      localStorage.setItem("micro-linear-theme", next);
     }
   }
 

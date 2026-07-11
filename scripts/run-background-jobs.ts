@@ -9,7 +9,7 @@ interface CliOptions {
 }
 
 function usage(): string {
-  return `Run Orbit background work once (safe for cron/systemd timers).
+  return `Run Micro Linear background work once (safe for cron/systemd timers).
 
 Usage:
   npm run jobs:run -- [options]

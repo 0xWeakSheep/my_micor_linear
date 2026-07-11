@@ -18,23 +18,23 @@ ENV NODE_ENV=production
 ENV PORT=3000
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 orbit \
-  && adduser --system --uid 1001 --ingroup orbit orbit \
+RUN addgroup --system --gid 1001 microlinear \
+  && adduser --system --uid 1001 --ingroup microlinear microlinear \
   && mkdir -p /app/.data \
-  && chown -R orbit:orbit /app \
+  && chown -R microlinear:microlinear /app \
   && chmod 700 /app/.data
 
-COPY --from=production-dependencies --chown=orbit:orbit /app/node_modules ./node_modules
-COPY --from=build --chown=orbit:orbit /app/.next ./.next
-COPY --from=build --chown=orbit:orbit /app/public ./public
-COPY --from=build --chown=orbit:orbit /app/scripts ./scripts
-COPY --from=build --chown=orbit:orbit /app/src ./src
-COPY --from=build --chown=orbit:orbit /app/package.json /app/package-lock.json ./
-COPY --from=build --chown=orbit:orbit /app/next.config.ts ./next.config.ts
-COPY --from=build --chown=orbit:orbit /app/tsconfig.json ./tsconfig.json
-COPY --from=build --chown=orbit:orbit --chmod=755 /app/deploy/docker-entrypoint.sh ./deploy/docker-entrypoint.sh
+COPY --from=production-dependencies --chown=microlinear:microlinear /app/node_modules ./node_modules
+COPY --from=build --chown=microlinear:microlinear /app/.next ./.next
+COPY --from=build --chown=microlinear:microlinear /app/public ./public
+COPY --from=build --chown=microlinear:microlinear /app/scripts ./scripts
+COPY --from=build --chown=microlinear:microlinear /app/src ./src
+COPY --from=build --chown=microlinear:microlinear /app/package.json /app/package-lock.json ./
+COPY --from=build --chown=microlinear:microlinear /app/next.config.ts ./next.config.ts
+COPY --from=build --chown=microlinear:microlinear /app/tsconfig.json ./tsconfig.json
+COPY --from=build --chown=microlinear:microlinear --chmod=755 /app/deploy/docker-entrypoint.sh ./deploy/docker-entrypoint.sh
 
-USER orbit
+USER microlinear
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

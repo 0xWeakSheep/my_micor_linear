@@ -38,6 +38,7 @@ import type {
 } from "@/lib/domain";
 import { getAll, getDatabaseFilePath, getOne } from "@/lib/db";
 import { getAccessibleTeams } from "@/lib/auth";
+import { preferredEnvironmentFlag } from "@/lib/runtime-config";
 
 interface WorkspaceContextRow {
   workspace_id: string;
@@ -198,7 +199,13 @@ function membershipFromRow(row: MembershipRow): Membership {
  * environment. Production requests never create accounts or known credentials.
  */
 export function ensureSeedData(): boolean {
-  if (process.env.NODE_ENV === "production" || process.env.ORBIT_DEMO_MODE !== "1") {
+  if (
+    process.env.NODE_ENV === "production" ||
+    !preferredEnvironmentFlag(
+      process.env.MICRO_LINEAR_DEMO_MODE,
+      process.env.ORBIT_DEMO_MODE,
+    )
+  ) {
     return false;
   }
 
@@ -216,7 +223,7 @@ export function ensureSeedData(): boolean {
     env: {
       ...process.env,
       NODE_NO_WARNINGS: "1",
-      ORBIT_DB_PATH: getDatabaseFilePath(),
+      MICRO_LINEAR_DB_PATH: getDatabaseFilePath(),
     },
   });
 

@@ -16,7 +16,7 @@ import {
   removeAttachment,
   storeAttachment,
 } from "@/lib/file-storage";
-import { createId, isTrustedRequest, SESSION_COOKIE_NAME } from "@/lib/security";
+import { createId, isTrustedRequest, readSessionCookie } from "@/lib/security";
 import {
   DomainValidationError,
   finishMutation,
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   let storedKey: string | null = null;
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { workspaceSlug } = await context.params;
     const workspace = getOne<{ id: string }>("SELECT id FROM workspaces WHERE slug = ? COLLATE NOCASE", workspaceSlug);

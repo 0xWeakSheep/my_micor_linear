@@ -1258,7 +1258,7 @@ function executeApiKeyAction(action: string, workspaceId: string, actorId: strin
   if (action === "apiKey.create") {
     const parsed = z.object({ name: z.string().trim().min(1).max(120), scopes: z.array(apiScopeSchema).min(1).max(20).optional(), expiresAt: dateTimeSchema.nullable().optional() }).strict().safeParse(payload);
     if (!parsed.success) invalid(parsed);
-    const id = createId("apikey"); const token = `orb_${generateOpaqueToken()}`; const prefix = token.slice(0, 12); const now = new Date().toISOString();
+    const id = createId("apikey"); const token = `ml_${generateOpaqueToken()}`; const prefix = token.slice(0, 12); const now = new Date().toISOString();
     const data = transaction((database) => {
       database.prepare(`INSERT INTO api_keys(id, workspace_id, user_id, name, prefix, token_hash, scopes_json, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, workspaceId, actorId, parsed.data.name, prefix, hashOpaqueToken(token), JSON.stringify(parsed.data.scopes ?? ["workspace:read", "issues:read", "issues:write", "projects:read"]), parsed.data.expiresAt ?? null, now);

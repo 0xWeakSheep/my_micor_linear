@@ -23,12 +23,12 @@ const CREATED_AT = "2026-07-01T00:00:00.000Z";
 let temporaryDirectory = "";
 
 function request(body: Record<string, unknown>): NextRequest {
-  return new NextRequest("http://orbit.test/api/auth/password", {
+  return new NextRequest("http://micro-linear.test/api/auth/password", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Cookie: `${SESSION_COOKIE_NAME}=${CURRENT_SESSION_TOKEN}`,
-      Origin: "http://orbit.test",
+      Origin: "http://micro-linear.test",
     },
     body: JSON.stringify(body),
   });
@@ -36,15 +36,15 @@ function request(body: Record<string, unknown>): NextRequest {
 
 beforeAll(async () => {
   closeDatabase();
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-password-"));
-  vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "password.db"));
-  vi.stubEnv("APP_URL", "http://orbit.test");
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-password-"));
+  vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "password.db"));
+  vi.stubEnv("APP_URL", "http://micro-linear.test");
   vi.stubEnv("AUTH_PASSWORD_PEPPER", "password-test-pepper");
   vi.stubEnv("AUTH_TOKEN_PEPPER", "token-test-pepper");
   const passwordHash = await hashPassword("current-password");
   getDatabase().exec(`
     INSERT INTO users(id, name, email, timezone, locale, created_at, updated_at)
-    VALUES ('user_password', 'Password User', 'password@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
+    VALUES ('user_password', 'Password User', 'password@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO password_credentials(user_id, password_hash, password_changed_at)
     VALUES ('user_password', '${passwordHash}', '${CREATED_AT}');
     INSERT INTO workspaces(id, name, slug, icon, timezone, settings_json, created_at, updated_at)

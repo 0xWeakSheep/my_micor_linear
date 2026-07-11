@@ -12,12 +12,13 @@ import type {
   WorkspaceRole,
 } from "@/lib/domain";
 import { getAll, getOne, nowIso, run, transaction } from "@/lib/db";
+import { preferredEnvironmentFlag } from "@/lib/runtime-config";
 import {
   createId,
   generateOpaqueToken,
   hashNetworkAddress,
   hashOpaqueToken,
-  SESSION_COOKIE_NAME,
+  readSessionCookie,
   SESSION_DURATION_SECONDS,
   slugify,
 } from "@/lib/security";
@@ -97,7 +98,14 @@ export interface SignupAccountInput {
  * explicitly opts into multi-workspace public signup.
  */
 export function isWorkspaceSignupAllowed(): boolean {
-  if (process.env.ORBIT_ALLOW_PUBLIC_SIGNUP === "1") return true;
+  if (
+    preferredEnvironmentFlag(
+      process.env.MICRO_LINEAR_ALLOW_PUBLIC_SIGNUP,
+      process.env.ORBIT_ALLOW_PUBLIC_SIGNUP,
+    )
+  ) {
+    return true;
+  }
   const users = getOne<{ count: number }>("SELECT COUNT(*) AS count FROM users");
   return Number(users?.count ?? 0) === 0;
 }
@@ -280,7 +288,7 @@ export function getSessionByToken(token: string | null | undefined): AuthSession
 
 export async function getCurrentSession(): Promise<AuthSession | null> {
   const cookieStore = await cookies();
-  return getSessionByToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  return getSessionByToken(readSessionCookie(cookieStore));
 }
 
 export async function requireCurrentSession(): Promise<AuthSession> {

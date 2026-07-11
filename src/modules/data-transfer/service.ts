@@ -317,7 +317,7 @@ function buildCsv(data: BootstrapData): string {
 
 function exportSnapshot(data: BootstrapData): Record<string, unknown> {
   return {
-    schema: "orbit.workspace.v1",
+    schema: "micro-linear.workspace.v1",
     exportedAt: new Date().toISOString(),
     workspace: data.workspace,
     data: {

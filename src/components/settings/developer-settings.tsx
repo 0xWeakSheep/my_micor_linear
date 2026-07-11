@@ -80,13 +80,13 @@ export function ApiSettings() {
 
       <SettingsSection title="Webhooks" description="向 HTTPS 端点发送所选工作区事件。">
         <FormBody>
-          <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={webhookName} onChange={(event) => setWebhookName(event.target.value)} placeholder="数据仓库" /></Field><Field label="端点 URL"><NativeInput type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/orbit" /></Field></div>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={webhookName} onChange={(event) => setWebhookName(event.target.value)} placeholder="数据仓库" /></Field><Field label="端点 URL"><NativeInput type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/micro-linear" /></Field></div>
           <EventPicker events={events} onChange={setEvents} />
         </FormBody>
         <FormFooter><Button variant="primary" size="sm" loading={creatingWebhook} disabled={!webhookName.trim() || !webhookUrl.trim() || !events.length} onClick={() => void createWebhook()}>创建 Webhook</Button></FormFooter>
         {revealedWebhookSecret ? (
           <div className="border-t border-border bg-[var(--warning-soft)] px-4 py-3 sm:px-5">
-            <p className="text-xs font-medium text-warning">签名密钥只显示一次，请立即复制并用于校验 X-Orbit-Signature。</p>
+            <p className="text-xs font-medium text-warning">签名密钥只显示一次，请立即复制并用于校验 X-Micro-Linear-Signature。</p>
             <div className="mt-2 flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-surface px-2.5 py-2 text-xs">{revealedWebhookSecret}</code><IconButton label="复制 Webhook 签名密钥" icon={<Clipboard size={14} />} variant="secondary" onClick={() => void navigator.clipboard.writeText(revealedWebhookSecret)} /></div>
           </div>
         ) : null}

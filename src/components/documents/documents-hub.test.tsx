@@ -15,7 +15,7 @@ import { DocumentsHub } from "./documents-hub";
 
 const launchDocument: Document = {
   id: "doc_launch",
-  workspaceId: "ws_orbit",
+  workspaceId: "ws_micro_linear",
   projectId: "project_launch",
   title: "Launch brief",
   content: "# Outcome\n\nShip a calm, fast workspace.",
@@ -26,7 +26,7 @@ const launchDocument: Document = {
 
 const runbookDocument: Document = {
   id: "doc_runbook",
-  workspaceId: "ws_orbit",
+  workspaceId: "ws_micro_linear",
   projectId: null,
   title: "Restore runbook",
   content: "# Restore\n\nStop writers before copying SQLite.",
@@ -40,13 +40,13 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
     currentUser: {
       id: "usr_demo",
       name: "Alex Chen",
-      email: "alex@orbit.test",
+      email: "alex@micro-linear.test",
       avatarUrl: null,
       createdAt: "2026-01-01T00:00:00.000Z",
     },
     currentMembership: {
       id: "wmem_demo",
-      workspaceId: "ws_orbit",
+      workspaceId: "ws_micro_linear",
       userId: "usr_demo",
       role,
       status: "active",
@@ -54,15 +54,15 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
       user: {
         id: "usr_demo",
         name: "Alex Chen",
-        email: "alex@orbit.test",
+        email: "alex@micro-linear.test",
         avatarUrl: null,
         createdAt: "2026-01-01T00:00:00.000Z",
       },
     },
     workspace: {
-      id: "ws_orbit",
-      name: "Orbit",
-      slug: "orbit",
+      id: "ws_micro_linear",
+      name: "Micro Linear",
+      slug: "micro-linear",
       icon: "O",
       timezone: "UTC",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -70,7 +70,7 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
     memberships: [
       {
         id: "wmem_demo",
-        workspaceId: "ws_orbit",
+        workspaceId: "ws_micro_linear",
         userId: "usr_demo",
         role,
         status: "active",
@@ -78,14 +78,14 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
         user: {
           id: "usr_demo",
           name: "Alex Chen",
-          email: "alex@orbit.test",
+          email: "alex@micro-linear.test",
           avatarUrl: null,
           createdAt: "2026-01-01T00:00:00.000Z",
         },
       },
       {
         id: "wmem_other",
-        workspaceId: "ws_orbit",
+        workspaceId: "ws_micro_linear",
         userId: "usr_other",
         role: "member",
         status: "active",
@@ -93,7 +93,7 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
         user: {
           id: "usr_other",
           name: "Maya Patel",
-          email: "maya@orbit.test",
+          email: "maya@micro-linear.test",
           avatarUrl: null,
           createdAt: "2026-01-01T00:00:00.000Z",
         },
@@ -102,7 +102,7 @@ function bootstrap(role: "admin" | "member" | "guest" = "member"): BootstrapData
     projects: [
       {
         id: "project_launch",
-        workspaceId: "ws_orbit",
+        workspaceId: "ws_micro_linear",
         teamId: null,
         name: "Public launch",
         slug: "public-launch",

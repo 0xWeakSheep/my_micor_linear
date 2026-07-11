@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { AuthenticationError, getSessionByToken, PermissionError } from "@/lib/auth";
 import { getOne } from "@/lib/db";
 import type { ActionResult } from "@/lib/domain";
-import { isTrustedRequest, SESSION_COOKIE_NAME } from "@/lib/security";
+import { isTrustedRequest, readSessionCookie } from "@/lib/security";
 import {
   importWorkspaceData,
   type DataFormat,
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { workspaceSlug } = await context.params;
     const workspace = getOne<{ id: string }>("SELECT id FROM workspaces WHERE slug = ? COLLATE NOCASE", workspaceSlug);

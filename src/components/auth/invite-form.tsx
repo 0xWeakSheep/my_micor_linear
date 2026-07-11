@@ -27,7 +27,7 @@ export function InviteForm({ invitation, signedInEmail, token }: InviteFormProps
     return <InviteState title="邀请链接无效" description="这个链接不存在或已被替换，请联系工作区管理员重新邀请。" />;
   }
   if (invitation.acceptedAt) {
-    return <InviteState icon={<CheckCircle2 size={20} />} title="邀请已使用" description="这个邀请已经被接受。你可以直接登录 Orbit。" action={<LinkButton href="/login">前往登录</LinkButton>} />;
+    return <InviteState icon={<CheckCircle2 size={20} />} title="邀请已使用" description="这个邀请已经被接受。你可以直接登录 Micro Linear。" action={<LinkButton href="/login">前往登录</LinkButton>} />;
   }
   if (invitation.expired) {
     return <InviteState title="邀请已过期" description="请联系工作区管理员生成一个新的邀请链接。" />;
@@ -87,7 +87,7 @@ export function InviteForm({ invitation, signedInEmail, token }: InviteFormProps
         </div>
       ) : activeInvitation.existingUser && !signedInEmail ? (
         <div className="mt-5">
-          <p className="text-center text-sm text-secondary">此邮箱已有 Orbit 账户，请先登录以确认身份。</p>
+          <p className="text-center text-sm text-secondary">此邮箱已有 Micro Linear 账户，请先登录以确认身份。</p>
           <LinkButton className="mt-4 w-full" href={loginHref}>登录并继续</LinkButton>
         </div>
       ) : (

@@ -5,6 +5,7 @@ import type { CreatedSession, SessionMetadata } from "@/lib/auth";
 import {
   getSessionCookieOptions,
   isTrustedRequest,
+  LEGACY_SESSION_COOKIE_NAME,
   SESSION_COOKIE_NAME,
 } from "@/lib/security";
 
@@ -45,11 +46,13 @@ export function sessionResponse(session: CreatedSession, status = 200): NextResp
 }
 
 export function clearSessionCookie(response: NextResponse): void {
-  response.cookies.set(SESSION_COOKIE_NAME, "", {
+  const options = {
     ...getSessionCookieOptions(),
     maxAge: 0,
     expires: new Date(0),
-  });
+  };
+  response.cookies.set(SESSION_COOKIE_NAME, "", options);
+  response.cookies.set(LEGACY_SESSION_COOKIE_NAME, "", options);
 }
 
 export function isUniqueConstraintError(error: unknown): boolean {

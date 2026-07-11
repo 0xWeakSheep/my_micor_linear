@@ -25,23 +25,23 @@ function authenticatedRequest(
 ): NextRequest {
   const headers = new Headers(init.headers);
   headers.set("Cookie", `${SESSION_COOKIE_NAME}=${SESSION_TOKEN}`);
-  headers.set("Origin", "http://orbit.test");
+  headers.set("Origin", "http://micro-linear.test");
   return new NextRequest(url, { ...init, headers });
 }
 
 beforeAll(async () => {
   closeDatabase();
-  temporaryDirectory = await mkdtemp(join(tmpdir(), "orbit-attachments-"));
+  temporaryDirectory = await mkdtemp(join(tmpdir(), "micro-linear-attachments-"));
   uploadDirectory = join(temporaryDirectory, "uploads");
-  vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "attachments.db"));
-  vi.stubEnv("ORBIT_UPLOAD_DIR", uploadDirectory);
-  vi.stubEnv("APP_URL", "http://orbit.test");
+  vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "attachments.db"));
+  vi.stubEnv("MICRO_LINEAR_UPLOAD_DIR", uploadDirectory);
+  vi.stubEnv("APP_URL", "http://micro-linear.test");
   vi.stubEnv("AUTH_TOKEN_PEPPER", "attachment-test-pepper");
 
   const database = getDatabase();
   database.exec(`
     INSERT INTO users(id, name, email, timezone, locale, created_at, updated_at)
-    VALUES ('user_attachment', 'Attachment User', 'attachment@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
+    VALUES ('user_attachment', 'Attachment User', 'attachment@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO sessions(id, user_id, token_hash, expires_at, last_seen_at, created_at)
     VALUES (
       'session_attachment', 'user_attachment', '${hashOpaqueToken(SESSION_TOKEN)}',
@@ -82,7 +82,7 @@ describe("authorized attachment storage", () => {
     form.set("issueId", "issue_attachment");
     form.set("file", new File(["attachment payload"], "verification.txt", { type: "text/plain" }));
     const upload = await POST(
-      authenticatedRequest("http://orbit.test/api/workspaces/attachments/attachments", {
+      authenticatedRequest("http://micro-linear.test/api/workspaces/attachments/attachments", {
         method: "POST",
         body: form,
       }),
@@ -95,7 +95,7 @@ describe("authorized attachment storage", () => {
     await expect(access(join(uploadDirectory, "workspace_attachment", uploaded.data.id))).resolves.toBeUndefined();
 
     const download = await GET(
-      authenticatedRequest(`http://orbit.test${uploaded.data.url}`),
+      authenticatedRequest(`http://micro-linear.test${uploaded.data.url}`),
       { params: Promise.resolve({ fileId: uploaded.data.id }) },
     );
     expect(download.status).toBe(200);
@@ -103,13 +103,13 @@ describe("authorized attachment storage", () => {
     await expect(download.text()).resolves.toBe("attachment payload");
 
     const unauthorized = await GET(
-      new NextRequest(`http://orbit.test${uploaded.data.url}`),
+      new NextRequest(`http://micro-linear.test${uploaded.data.url}`),
       { params: Promise.resolve({ fileId: uploaded.data.id }) },
     );
     expect(unauthorized.status).toBe(401);
 
     const removed = await DELETE(
-      authenticatedRequest(`http://orbit.test${uploaded.data.url}`, { method: "DELETE" }),
+      authenticatedRequest(`http://micro-linear.test${uploaded.data.url}`, { method: "DELETE" }),
       { params: Promise.resolve({ fileId: uploaded.data.id }) },
     );
     expect(removed.status).toBe(200);

@@ -8,6 +8,7 @@ import {
   hashPassword,
   isTrustedRequest,
   normalizeDisplayName,
+  readSessionCookie,
   SESSION_COOKIE_NAME,
   validatePassword,
 } from "@/lib/security";
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     const invitation = getInvitationSummary(parsed.data.token);
     if (!invitation) throw new ResourceNotFoundError("Invitation not found.");
 
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (session) {
       const accepted = acceptInvitationForUser(parsed.data.token, session.userId);
       return NextResponse.json<ActionResult<AcceptInvitationResult>>(

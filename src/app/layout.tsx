@@ -17,12 +17,12 @@ const appMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Orbit",
-    template: "%s · Orbit",
+    default: "Micro Linear",
+    template: "%s · Micro Linear",
   },
   description:
     "A fast, keyboard-first workspace for issues, projects, cycles, and product planning.",
-  applicationName: "Orbit",
+  applicationName: "Micro Linear",
   robots: { index: false, follow: false },
 };
 
@@ -38,7 +38,8 @@ export const viewport: Viewport = {
 
 const themeScript = `
   try {
-    const saved = localStorage.getItem('orbit-theme');
+    const saved = localStorage.getItem('micro-linear-theme') ?? localStorage.getItem('orbit-theme');
+    if (saved) localStorage.setItem('micro-linear-theme', saved);
     const dark = saved ? saved === 'dark' : true;
     document.documentElement.classList.toggle('dark', dark);
   } catch (_) {

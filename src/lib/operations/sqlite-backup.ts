@@ -23,10 +23,13 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 
 import { migrations } from "@/lib/db/schema";
+import { preferredEnvironmentValue } from "@/lib/runtime-config";
 
-const BACKUP_FORMAT = "orbit-backup";
+const BACKUP_FORMAT = "micro-linear-backup";
+const LEGACY_BACKUP_FORMAT = "orbit-backup";
 const BACKUP_VERSION = 1;
-const DATABASE_FILE = "orbit.sqlite";
+const DATABASE_FILE = "micro-linear.sqlite";
+const LEGACY_DATABASE_FILE = "orbit.sqlite";
 const UPLOAD_DIRECTORY = "uploads";
 const MANIFEST_FILE = "manifest.json";
 const CORE_TABLES = [
@@ -55,11 +58,11 @@ const backupFileSchema = z.object({
 });
 
 const manifestSchema = z.object({
-  format: z.literal(BACKUP_FORMAT),
+  format: z.enum([BACKUP_FORMAT, LEGACY_BACKUP_FORMAT]),
   version: z.literal(BACKUP_VERSION),
   createdAt: z.string().datetime(),
   database: z.object({
-    file: z.literal(DATABASE_FILE),
+    file: z.enum([DATABASE_FILE, LEGACY_DATABASE_FILE]),
     sizeBytes: z.number().int().positive(),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     integrityCheck: z.literal("ok"),
@@ -188,7 +191,7 @@ function readMigrations(database: DatabaseSync): Array<{ version: number; name: 
   const table = database
     .prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
     .get();
-  if (!table) throw new Error("Database does not contain Orbit schema migrations.");
+  if (!table) throw new Error("Database does not contain Micro Linear schema migrations.");
   return (
     database
       .prepare("SELECT version, name FROM schema_migrations ORDER BY version")
@@ -281,7 +284,7 @@ function writeJsonDurably(path: string, value: unknown): void {
 
 function backupName(now: Date): string {
   const timestamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  return `orbit-backup-${timestamp}-${randomBytes(4).toString("hex")}`;
+  return `micro-linear-backup-${timestamp}-${randomBytes(4).toString("hex")}`;
 }
 
 async function copyReferencedUploads(
@@ -602,7 +605,7 @@ export async function verifyBackupRestore(
     throw new Error("Backup database checksum does not match its manifest.");
   }
 
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-restore-verify-"));
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-restore-verify-"));
   const temporaryDatabase = join(temporaryDirectory, DATABASE_FILE);
   const temporaryUploads = join(temporaryDirectory, UPLOAD_DIRECTORY);
   let succeeded = false;
@@ -652,13 +655,32 @@ export async function verifyBackupRestore(
 }
 
 export function defaultDatabasePath(): string {
-  return resolve(process.env.ORBIT_DB_PATH?.trim() || ".data/orbit.db");
+  const configured = preferredEnvironmentValue(
+    process.env.MICRO_LINEAR_DB_PATH,
+    process.env.ORBIT_DB_PATH,
+  );
+  if (configured) return resolve(configured);
+  const currentDefault = resolve(".data/micro-linear.db");
+  const legacyDefault = resolve(".data/orbit.db");
+  return existsSync(currentDefault) || !existsSync(legacyDefault)
+    ? currentDefault
+    : legacyDefault;
 }
 
 export function defaultUploadDirectory(): string {
-  return resolve(process.env.ORBIT_UPLOAD_DIR?.trim() || ".data/uploads");
+  return resolve(
+    preferredEnvironmentValue(
+      process.env.MICRO_LINEAR_UPLOAD_DIR,
+      process.env.ORBIT_UPLOAD_DIR,
+    ) || ".data/uploads",
+  );
 }
 
 export function defaultBackupDirectory(): string {
-  return resolve(process.env.ORBIT_BACKUP_DIR?.trim() || ".data/backups");
+  return resolve(
+    preferredEnvironmentValue(
+      process.env.MICRO_LINEAR_BACKUP_DIR,
+      process.env.ORBIT_BACKUP_DIR,
+    ) || ".data/backups",
+  );
 }

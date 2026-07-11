@@ -5,13 +5,17 @@ import { dirname, resolve } from "node:path";
 import type { BindValue, Database } from "../src/lib/db";
 import { closeDatabase, getDatabase, getDatabaseFilePath } from "../src/lib/db";
 import { hashPassword, hashOpaqueToken } from "../src/lib/security";
+import {
+  preferredEnvironmentFlag,
+  preferredEnvironmentValue,
+} from "../src/lib/runtime-config";
 import { sealWebhookSecret } from "../src/lib/webhook-secret";
 
 type SeedRow = Record<string, BindValue>;
 
 const CREATED = "2026-05-04T09:00:00.000Z";
 const NOW = "2026-07-11T08:00:00.000Z";
-const WORKSPACE_ID = "ws_orbit";
+const WORKSPACE_ID = "ws_micro_linear";
 const SEED_UPLOADS = [
   {
     storageKey: "seed/drag-placeholder.mp4",
@@ -23,7 +27,7 @@ const SEED_UPLOADS = [
   {
     storageKey: "seed/contrast-audit.pdf",
     bytes: Buffer.from(
-      "%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n% Orbit seed contrast audit placeholder\n%%EOF\n",
+      "%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n% Micro Linear seed contrast audit placeholder\n%%EOF\n",
       "utf8",
     ),
   },
@@ -38,7 +42,12 @@ function seedChecksum(bytes: Uint8Array): string {
 }
 
 function materializeSeedUploads(): void {
-  const root = resolve(process.env.ORBIT_UPLOAD_DIR?.trim() || ".data/uploads");
+  const root = resolve(
+    preferredEnvironmentValue(
+      process.env.MICRO_LINEAR_UPLOAD_DIR,
+      process.env.ORBIT_UPLOAD_DIR,
+    ) || ".data/uploads",
+  );
   for (const upload of SEED_UPLOADS) {
     const path = resolve(root, upload.storageKey);
     mkdirSync(dirname(path), { recursive: true });
@@ -87,10 +96,18 @@ async function seed(): Promise<void> {
     .prepare(
       `SELECT
         (SELECT COUNT(*) FROM users) AS users,
-        EXISTS(SELECT 1 FROM users WHERE email = 'demo@orbit.local' COLLATE NOCASE) AS has_demo`,
+        EXISTS(
+          SELECT 1 FROM users
+          WHERE email IN ('demo@micro-linear.local', 'demo@orbit.local') COLLATE NOCASE
+        ) AS has_demo`,
     )
     .get() as { users: number; has_demo: number };
-  const resetRequested = process.argv.includes("--reset") || process.env.ORBIT_SEED_RESET === "1";
+  const resetRequested =
+    process.argv.includes("--reset") ||
+    preferredEnvironmentFlag(
+      process.env.MICRO_LINEAR_SEED_RESET,
+      process.env.ORBIT_SEED_RESET,
+    );
 
   if (Number(existing.users) > 0 && !resetRequested) {
     if (Boolean(existing.has_demo)) {
@@ -106,10 +123,10 @@ async function seed(): Promise<void> {
   }
 
   const demoPasswordHash = await hashPassword("demo12345", {
-    salt: Buffer.from("orbit-demo-seed-salt-v1", "utf8"),
+    salt: Buffer.from("micro-linear-demo-seed-salt-v1", "utf8"),
   });
   const teammatePasswordHash = await hashPassword("teammate123", {
-    salt: Buffer.from("orbit-team-seed-salt-v1", "utf8"),
+    salt: Buffer.from("micro-linear-team-seed-salt-v1", "utf8"),
   });
   materializeSeedUploads();
 
@@ -123,7 +140,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_demo",
         name: "Alex Chen",
-        email: "demo@orbit.local",
+        email: "demo@micro-linear.local",
         avatar_url: null,
         timezone: "Asia/Shanghai",
         locale: "zh-CN",
@@ -134,7 +151,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_maya",
         name: "Maya Patel",
-        email: "maya@orbit.local",
+        email: "maya@micro-linear.local",
         avatar_url: null,
         timezone: "America/Los_Angeles",
         locale: "en",
@@ -145,7 +162,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_jon",
         name: "Jon Bell",
-        email: "jon@orbit.local",
+        email: "jon@micro-linear.local",
         avatar_url: null,
         timezone: "Europe/London",
         locale: "en",
@@ -156,7 +173,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_priya",
         name: "Priya Singh",
-        email: "priya@orbit.local",
+        email: "priya@micro-linear.local",
         avatar_url: null,
         timezone: "Asia/Kolkata",
         locale: "en",
@@ -167,7 +184,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_leo",
         name: "Leo Martin",
-        email: "leo@orbit.local",
+        email: "leo@micro-linear.local",
         avatar_url: null,
         timezone: "Europe/Paris",
         locale: "en",
@@ -178,7 +195,7 @@ async function seed(): Promise<void> {
       {
         id: "usr_sara",
         name: "Sara Kim",
-        email: "sara@orbit.local",
+        email: "sara@micro-linear.local",
         avatar_url: null,
         timezone: "America/New_York",
         locale: "en",
@@ -204,9 +221,9 @@ async function seed(): Promise<void> {
     insertRows(database, "workspaces", [
       {
         id: WORKSPACE_ID,
-        name: "Orbit",
-        slug: "orbit",
-        icon: "O",
+        name: "Micro Linear",
+        slug: "micro-linear",
+        icon: "M",
         timezone: "Asia/Shanghai",
         settings_json: JSON.stringify({
           weekStartsOn: 1,
@@ -234,7 +251,7 @@ async function seed(): Promise<void> {
         workspace_id: WORKSPACE_ID,
         email: "nora@example.com",
         role: "member",
-        token_hash: hashOpaqueToken("orbit-seed-invitation-token"),
+        token_hash: hashOpaqueToken("micro-linear-seed-invitation-token"),
         invited_by_id: "usr_demo",
         accepted_by_id: null,
         expires_at: "2026-07-18T08:00:00.000Z",
@@ -266,7 +283,7 @@ async function seed(): Promise<void> {
         parent_id: null,
         name: "Design",
         key: "DES",
-        description: "Shape Orbit's interaction and visual language.",
+        description: "Shape Micro Linear's interaction and visual language.",
         color: "#D863B0",
         icon: "D",
         is_private: 0,
@@ -352,7 +369,7 @@ async function seed(): Promise<void> {
     insertRows(database, "projects", [
       {
         id: "project_launch", workspace_id: WORKSPACE_ID, status_id: "pstatus_started", team_id: "team_eng",
-        name: "Orbit public launch", slug: "orbit-public-launch", summary: "Ship the focused issue tracking experience.",
+        name: "Micro Linear public launch", slug: "micro-linear-public-launch", summary: "Ship the focused issue tracking experience.",
         description: "Deliver a cohesive workspace, fast issue workflows, and dependable collaboration for the first production teams.",
         status: "started", priority: 1, lead_id: "usr_demo", health: "onTrack", color: "#5E6AD2", icon: "🚀",
         start_date: "2026-06-01", target_date: "2026-08-28", sort_order: 100, archived_at: null, trashed_at: null,
@@ -608,7 +625,7 @@ async function seed(): Promise<void> {
 
     insertRows(database, "initiatives", [
       { id: "initiative_quality", workspace_id: WORKSPACE_ID, parent_id: null, name: "Product quality", summary: "A focused, dependable product teams enjoy using every day.", description: "Raise the quality bar across interaction design, performance, reliability, and accessibility.", status: "active", priority: 1, owner_id: "usr_demo", health: "onTrack", target_date: "2026-10-30", color: "#5E6AD2", sort_order: 100, created_at: CREATED, updated_at: NOW },
-      { id: "initiative_everywhere", workspace_id: WORKSPACE_ID, parent_id: "initiative_quality", name: "Orbit everywhere", summary: "Stay in the loop away from the desk.", description: "Extend the essential Orbit workflows to smaller screens after the web launch.", status: "planned", priority: 3, owner_id: "usr_jon", health: null, target_date: "2026-12-18", color: "#D863B0", sort_order: 200, created_at: CREATED, updated_at: NOW },
+      { id: "initiative_everywhere", workspace_id: WORKSPACE_ID, parent_id: "initiative_quality", name: "Micro Linear everywhere", summary: "Stay in the loop away from the desk.", description: "Extend the essential Micro Linear workflows to smaller screens after the web launch.", status: "planned", priority: 3, owner_id: "usr_jon", health: null, target_date: "2026-12-18", color: "#D863B0", sort_order: 200, created_at: CREATED, updated_at: NOW },
     ]);
     insertRows(database, "initiative_projects", [
       { initiative_id: "initiative_quality", project_id: "project_launch", position: 100 },
@@ -620,14 +637,14 @@ async function seed(): Promise<void> {
     ]);
 
     insertRows(database, "documents", [
-      { id: "doc_launch_brief", workspace_id: WORKSPACE_ID, project_id: "project_launch", title: "Launch brief", content: "# Orbit launch\n\n## Outcome\nA fast, calm issue tracker for teams under 100 people.\n\n## Principles\n- Keyboard first\n- Clear hierarchy\n- Trustworthy collaboration", creator_id: "usr_demo", created_at: "2026-05-20T09:00:00.000Z", updated_at: "2026-07-08T09:00:00.000Z" },
+      { id: "doc_launch_brief", workspace_id: WORKSPACE_ID, project_id: "project_launch", title: "Launch brief", content: "# Micro Linear launch\n\n## Outcome\nA fast, calm issue tracker for teams under 100 people.\n\n## Principles\n- Keyboard first\n- Clear hierarchy\n- Trustworthy collaboration", creator_id: "usr_demo", created_at: "2026-05-20T09:00:00.000Z", updated_at: "2026-07-08T09:00:00.000Z" },
       { id: "doc_command_taxonomy", workspace_id: WORKSPACE_ID, project_id: "project_launch", title: "Command taxonomy", content: "# Command taxonomy\n\nCommands use verbs, preserve the current workspace context, and advertise their shortcut when one exists.", creator_id: "usr_maya", created_at: "2026-07-08T07:00:00.000Z", updated_at: "2026-07-09T08:00:00.000Z" },
       { id: "doc_restore_runbook", workspace_id: WORKSPACE_ID, project_id: "project_reliability", title: "SQLite restore runbook", content: "# Restore runbook\n\n1. Stop writers\n2. Copy database, WAL, and attachments\n3. Run integrity checks\n4. Start isolated app\n5. Verify representative records", creator_id: "usr_priya", created_at: "2026-06-20T09:00:00.000Z", updated_at: "2026-07-10T09:00:00.000Z" },
     ]);
     insertRows(database, "project_resources", [
       { id: "resource_launch_brief", project_id: "project_launch", type: "document", title: "Launch brief", url: null, document_id: "doc_launch_brief", file_id: null, position: 100, created_at: "2026-05-20T09:00:00.000Z" },
       { id: "resource_command", project_id: "project_launch", type: "document", title: "Command taxonomy", url: null, document_id: "doc_command_taxonomy", file_id: null, position: 200, created_at: "2026-07-08T07:00:00.000Z" },
-      { id: "resource_repo", project_id: "project_launch", type: "url", title: "Source repository", url: "https://example.com/orbit", document_id: null, file_id: null, position: 300, created_at: CREATED },
+      { id: "resource_repo", project_id: "project_launch", type: "url", title: "Source repository", url: "https://example.com/micro-linear", document_id: null, file_id: null, position: 300, created_at: CREATED },
       { id: "resource_restore", project_id: "project_reliability", type: "document", title: "Restore runbook", url: null, document_id: "doc_restore_runbook", file_id: null, position: 100, created_at: "2026-06-20T09:00:00.000Z" },
     ]);
 
@@ -674,10 +691,10 @@ async function seed(): Promise<void> {
     ]);
 
     insertRows(database, "api_keys", [
-      { id: "apikey_demo", workspace_id: WORKSPACE_ID, user_id: "usr_demo", name: "Local automation", prefix: "orb_demo", token_hash: hashOpaqueToken("orb_demo_seed_token"), scopes_json: JSON.stringify(["issues:read", "issues:write", "projects:read"]), last_used_at: "2026-07-10T08:00:00.000Z", expires_at: null, created_at: CREATED },
+      { id: "apikey_demo", workspace_id: WORKSPACE_ID, user_id: "usr_demo", name: "Local automation", prefix: "ml_demo", token_hash: hashOpaqueToken("ml_demo_seed_token"), scopes_json: JSON.stringify(["issues:read", "issues:write", "projects:read"]), last_used_at: "2026-07-10T08:00:00.000Z", expires_at: null, created_at: CREATED },
     ]);
     insertRows(database, "webhooks", [
-      { id: "webhook_local", workspace_id: WORKSPACE_ID, name: "Local release bot", url: "http://localhost:4000/hooks/orbit", secret_hash: hashOpaqueToken("orbit-seed-webhook-secret"), signing_secret_encrypted: sealWebhookSecret("orbit-seed-webhook-secret"), events_json: JSON.stringify(["issue.created", "issue.updated", "project.update.created"]), is_active: 1, created_by_id: "usr_demo", created_at: CREATED, updated_at: NOW },
+      { id: "webhook_local", workspace_id: WORKSPACE_ID, name: "Local release bot", url: "http://localhost:4000/hooks/micro-linear", secret_hash: hashOpaqueToken("micro-linear-seed-webhook-secret"), signing_secret_encrypted: sealWebhookSecret("micro-linear-seed-webhook-secret"), events_json: JSON.stringify(["issue.created", "issue.updated", "project.update.created"]), is_active: 1, created_by_id: "usr_demo", created_at: CREATED, updated_at: NOW },
     ]);
     insertRows(database, "webhook_deliveries", [
       { id: "delivery_seed", webhook_id: "webhook_local", event_id: "event_seed_issue", request_body: JSON.stringify({ type: "issue.updated", data: { id: "issue_eng_102" } }), response_status: 200, response_body: "ok", attempt: 1, next_attempt_at: null, delivered_at: "2026-07-11T05:46:00.000Z", created_at: "2026-07-11T05:45:30.000Z" },
@@ -726,7 +743,7 @@ async function seed(): Promise<void> {
 
   console.log(`Seeded ${getDatabaseFilePath()}`);
   console.log(counts);
-  console.log("Demo login: demo@orbit.local / demo12345");
+  console.log("Demo login: demo@micro-linear.local / demo12345");
   closeDatabase();
 }
 

@@ -26,10 +26,10 @@ function request(
 ): NextRequest {
   const headers = new Headers({
     "Content-Type": "application/json",
-    Origin: "http://orbit.test",
+    Origin: "http://micro-linear.test",
   });
   if (sessionToken) headers.set("Cookie", `${SESSION_COOKIE_NAME}=${sessionToken}`);
-  return new NextRequest("http://orbit.test/api/invitations/accept", {
+  return new NextRequest("http://micro-linear.test/api/invitations/accept", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -38,17 +38,17 @@ function request(
 
 beforeAll(() => {
   closeDatabase();
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-invitations-"));
-  vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "invitations.db"));
-  vi.stubEnv("APP_URL", "http://orbit.test");
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-invitations-"));
+  vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "invitations.db"));
+  vi.stubEnv("APP_URL", "http://micro-linear.test");
   vi.stubEnv("AUTH_PASSWORD_PEPPER", "invitation-password-pepper");
   vi.stubEnv("AUTH_TOKEN_PEPPER", "invitation-token-pepper");
   const database = getDatabase();
   database.exec(`
     INSERT INTO users(id, name, email, timezone, locale, created_at, updated_at)
     VALUES
-      ('user_admin', 'Admin', 'admin@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
-      ('user_existing', 'Existing', 'existing@orbit.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
+      ('user_admin', 'Admin', 'admin@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}'),
+      ('user_existing', 'Existing', 'existing@micro-linear.test', 'UTC', 'en', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO workspaces(id, name, slug, icon, timezone, settings_json, created_at, updated_at)
     VALUES ('workspace_invite', 'Invite Workspace', 'invite-workspace', 'I', 'UTC', '{}', '${CREATED_AT}', '${CREATED_AT}');
     INSERT INTO workspace_members(id, workspace_id, user_id, role, status, joined_at)
@@ -60,8 +60,8 @@ beforeAll(() => {
     INSERT INTO invitations(
       id, workspace_id, email, role, token_hash, invited_by_id, expires_at, created_at
     ) VALUES
-      ('invite_new', 'workspace_invite', 'new@orbit.test', 'member', '${hashOpaqueToken(NEW_USER_TOKEN)}', 'user_admin', '2030-01-01T00:00:00.000Z', '${CREATED_AT}'),
-      ('invite_existing', 'workspace_invite', 'existing@orbit.test', 'guest', '${hashOpaqueToken(EXISTING_USER_TOKEN)}', 'user_admin', '2030-01-01T00:00:00.000Z', '${CREATED_AT}');
+      ('invite_new', 'workspace_invite', 'new@micro-linear.test', 'member', '${hashOpaqueToken(NEW_USER_TOKEN)}', 'user_admin', '2030-01-01T00:00:00.000Z', '${CREATED_AT}'),
+      ('invite_existing', 'workspace_invite', 'existing@micro-linear.test', 'guest', '${hashOpaqueToken(EXISTING_USER_TOKEN)}', 'user_admin', '2030-01-01T00:00:00.000Z', '${CREATED_AT}');
   `);
 });
 
@@ -87,13 +87,13 @@ describe("invitation acceptance", () => {
       `SELECT COUNT(*) AS count
          FROM workspace_members wm
          JOIN users u ON u.id = wm.user_id
-        WHERE wm.workspace_id = 'workspace_invite' AND u.email = 'new@orbit.test' AND wm.role = 'member'`,
+        WHERE wm.workspace_id = 'workspace_invite' AND u.email = 'new@micro-linear.test' AND wm.role = 'member'`,
     )?.count).toBe(1);
     expect(getOne<{ count: number }>(
       `SELECT COUNT(*) AS count
          FROM password_credentials pc
          JOIN users u ON u.id = pc.user_id
-        WHERE u.email = 'new@orbit.test'`,
+        WHERE u.email = 'new@micro-linear.test'`,
     )?.count).toBe(1);
   });
 

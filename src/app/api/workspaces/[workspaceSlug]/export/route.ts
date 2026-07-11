@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { AuthenticationError, getSessionByToken, PermissionError } from "@/lib/auth";
 import { getOne } from "@/lib/db";
-import { SESSION_COOKIE_NAME } from "@/lib/security";
+import { readSessionCookie } from "@/lib/security";
 import { exportWorkspaceData } from "@/modules/data-transfer/service";
 import { DomainValidationError, ResourceNotFoundError } from "@/modules/shared/mutation";
 
@@ -15,7 +15,7 @@ interface RouteContext {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { workspaceSlug } = await context.params;
     const workspace = getOne<{ id: string }>(

@@ -85,7 +85,7 @@ function invalidToken(message = "The bearer token is invalid or no longer active
     401,
     "invalid_token",
     message,
-    'Bearer realm="Orbit API", error="invalid_token"',
+    'Bearer realm="Micro Linear API", error="invalid_token"',
   );
 }
 
@@ -96,7 +96,7 @@ function parseBearerToken(request: Request): string {
       401,
       "authentication_required",
       "A bearer API token is required.",
-      'Bearer realm="Orbit API"',
+      'Bearer realm="Micro Linear API"',
     );
   }
 
@@ -150,7 +150,7 @@ function authenticate(
       403,
       "insufficient_scope",
       `This API token requires the following scope: ${missingScopes.join(", ")}.`,
-      `Bearer realm="Orbit API", error="insufficient_scope", scope="${missingScopes.join(" ")}"`,
+      `Bearer realm="Micro Linear API", error="insufficient_scope", scope="${missingScopes.join(" ")}"`,
     );
   }
 
@@ -184,7 +184,7 @@ function errorDetails(error: unknown): {
       status: 401,
       code: "invalid_token",
       message: error.message,
-      authenticateHeader: 'Bearer realm="Orbit API", error="invalid_token"',
+      authenticateHeader: 'Bearer realm="Micro Linear API", error="invalid_token"',
     };
   }
   if (error instanceof PermissionError) {

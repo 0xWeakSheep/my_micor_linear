@@ -7,7 +7,7 @@ import { getDatabase, transaction } from "@/lib/db";
 import type { ActionResult } from "@/lib/domain";
 import {
   hashPassword,
-  SESSION_COOKIE_NAME,
+  readSessionCookie,
   validatePassword,
   verifyPassword,
 } from "@/lib/security";
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   const rejected = rejectUntrustedRequest(request);
   if (rejected) return rejected;
 
-  const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  const session = getSessionByToken(readSessionCookie(request.cookies));
   if (!session) return errorResponse("Authentication required.", 401);
 
   let payload: unknown;

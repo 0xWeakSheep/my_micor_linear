@@ -6,7 +6,8 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-export const SESSION_COOKIE_NAME = "orbit_session";
+export const SESSION_COOKIE_NAME = "micro_linear_session";
+export const LEGACY_SESSION_COOKIE_NAME = "orbit_session";
 export const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
@@ -17,7 +18,18 @@ const SCRYPT_P = 1;
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_MAX_MEMORY = 32 * 1024 * 1024;
 const PASSWORD_HASH_VERSION = "scrypt-v1";
-const DUMMY_SALT = Buffer.from("orbit-auth-dummy-salt-v1", "utf8");
+const DUMMY_SALT = Buffer.from("micro-linear-auth-dummy-salt-v1", "utf8");
+
+interface CookieReader {
+  get(name: string): { value: string } | undefined;
+}
+
+export function readSessionCookie(cookies: CookieReader): string | undefined {
+  return (
+    cookies.get(SESSION_COOKIE_NAME)?.value ??
+    cookies.get(LEGACY_SESSION_COOKIE_NAME)?.value
+  );
+}
 
 export interface PasswordHashOptions {
   /** Intended for deterministic fixtures only. Production callers should omit it. */

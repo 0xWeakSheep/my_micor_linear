@@ -22,10 +22,10 @@ afterEach(() => {
 
 describe("demo bootstrap policy", () => {
   it("never creates demo accounts in production even when demo mode is requested", () => {
-    temporaryDirectory = mkdtempSync(join(tmpdir(), "orbit-bootstrap-"));
-    vi.stubEnv("ORBIT_DB_PATH", join(temporaryDirectory, "empty.db"));
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "micro-linear-bootstrap-"));
+    vi.stubEnv("MICRO_LINEAR_DB_PATH", join(temporaryDirectory, "empty.db"));
     vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("ORBIT_DEMO_MODE", "1");
+    vi.stubEnv("MICRO_LINEAR_DEMO_MODE", "1");
 
     expect(ensureSeedData()).toBe(false);
     expect(getOne<{ count: number }>("SELECT COUNT(*) AS count FROM users")).toEqual({ count: 0 });

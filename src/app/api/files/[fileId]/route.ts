@@ -11,7 +11,7 @@ import { getOne, transaction } from "@/lib/db";
 import type { ActionResult } from "@/lib/domain";
 import { publishWorkspaceEvent } from "@/lib/events";
 import { readAttachment, removeAttachment } from "@/lib/file-storage";
-import { isTrustedRequest, SESSION_COOKIE_NAME } from "@/lib/security";
+import { isTrustedRequest, readSessionCookie } from "@/lib/security";
 import { recordAudit, ResourceNotFoundError } from "@/modules/shared/mutation";
 
 export const runtime = "nodejs";
@@ -67,7 +67,7 @@ function errorResponse(error: unknown) {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { fileId } = await context.params;
     const file = getFile(fileId);
@@ -95,7 +95,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return NextResponse.json<ActionResult>({ ok: false, error: "Cross-site request rejected." }, { status: 403 });
   }
   try {
-    const session = getSessionByToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+    const session = getSessionByToken(readSessionCookie(request.cookies));
     if (!session) throw new AuthenticationError();
     const { fileId } = await context.params;
     const file = getFile(fileId);

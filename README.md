@@ -1,12 +1,12 @@
-# Orbit
+# Micro Linear
 
-Orbit 是一个面向 100 人以内团队的 Linear 风格产品协作系统。它覆盖 Issue、团队工作流、Triage、Cycle、Project、Initiative、View、Inbox、搜索、通知、报表和管理设置，不包含任何 AI 功能。
+Micro Linear 是一个面向 100 人以内团队的 Linear 风格产品协作系统。它覆盖 Issue、团队工作流、Triage、Cycle、Project、Initiative、View、Inbox、搜索、通知、报表和管理设置，不包含任何 AI 功能。
 
 > 本项目是独立实现，与 Linear 公司没有关联。当前交付状态见 [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md)；[`docs/FEATURES.md`](docs/FEATURES.md) 是依据公开 Linear 文档整理的产品研究清单，不代表每一项均已实现。
 
 ## 本地启动
 
-要求：Node.js 22.13+ 或 24+、npm 10+。应用使用 Node 内置 SQLite，数据默认保存在 `.data/orbit.db`。
+要求：Node.js 22.13+ 或 24+、npm 10+。应用使用 Node 内置 SQLite，数据默认保存在 `.data/micro-linear.db`。
 
 ```bash
 npm install
@@ -17,13 +17,13 @@ npm run dev
 打开 [http://localhost:3000](http://localhost:3000)，使用演示账户：
 
 ```text
-邮箱：demo@orbit.local
+邮箱：demo@micro-linear.local
 密码：demo12345
 ```
 
 种子脚本只用于本地演示：空数据库会被初始化；已经包含演示数据时不做任何修改；其他非空数据库会被安全拒绝。只有明确要抹掉并重建本地演示库时，才使用 `npm run db:seed -- --reset`；`NODE_ENV=production` 下种子命令始终拒绝运行。健康检查和生产请求绝不会创建演示账户或已知凭证。
 
-真实部署不需要种子数据：直接启动空数据库，然后在 `/signup` 创建首个工作区管理员。此后公开注册会自动关闭，新成员必须使用管理员生成的邀请链接加入；只有显式设置 `ORBIT_ALLOW_PUBLIC_SIGNUP=1` 才会重新开放多工作区自助注册。登录页不会预填或展示演示凭证。
+真实部署不需要种子数据：直接启动空数据库，然后在 `/signup` 创建首个工作区管理员。此后公开注册会自动关闭，新成员必须使用管理员生成的邀请链接加入；只有显式设置 `MICRO_LINEAR_ALLOW_PUBLIC_SIGNUP=1` 才会重新开放多工作区自助注册。登录页不会预填或展示演示凭证。
 
 ## 常用命令
 
@@ -42,14 +42,14 @@ npm run check        # 完整质量门禁
 
 ## REST API v1
 
-Orbit 提供面向内部自动化的 REST API，基础地址为 `/api/v1`。API Key 在工作区设置中创建，密钥只展示一次；调用时通过标准 Bearer Header 传递：
+Micro Linear 提供面向内部自动化的 REST API，基础地址为 `/api/v1`。API Key 在工作区设置中创建，密钥只展示一次；调用时通过标准 Bearer Header 传递：
 
 ```bash
 curl http://localhost:3000/api/v1/issues \
-  -H 'Authorization: Bearer orb_demo_seed_token'
+  -H 'Authorization: Bearer ml_demo_seed_token'
 ```
 
-`orb_demo_seed_token` 仅是本地种子数据中的演示密钥，拥有 `issues:read`、`issues:write` 和 `projects:read`。生产环境请创建并妥善保管独立密钥，不要把它提交到代码仓库。
+`ml_demo_seed_token` 仅是本地种子数据中的演示密钥，拥有 `issues:read`、`issues:write` 和 `projects:read`。生产环境请创建并妥善保管独立密钥，不要把它提交到代码仓库。
 
 | Method | Path | Scope | 说明 |
 | --- | --- | --- | --- |
@@ -104,7 +104,7 @@ curl -X PATCH http://localhost:3000/api/v1/issues/issue_eng_102 \
 
 ## 数据与备份
 
-开发数据库位于 `.data/orbit.db`，附件位于 `.data/uploads`；可分别通过 `ORBIT_DB_PATH` 和 `ORBIT_UPLOAD_DIR` 修改。生产环境必须把两者放在持久化磁盘，并保持单个 SQLite 写入实例。
+开发数据库位于 `.data/micro-linear.db`，附件位于 `.data/uploads`；可分别通过 `MICRO_LINEAR_DB_PATH` 和 `MICRO_LINEAR_UPLOAD_DIR` 修改。生产环境必须把两者放在持久化磁盘，并保持单个 SQLite 写入实例。升级自旧品牌版本时会自动读取原 `.data/orbit.db` 及旧 `ORBIT_*` 变量，避免迁移后打开空库。
 
 执行在线备份：
 
@@ -113,9 +113,9 @@ npm run db:backup
 npm run db:backups
 ```
 
-备份使用 SQLite `VACUUM INTO` 获取一致性快照，不依赖系统安装 `sqlite3`。每次生成一个新的、拒绝覆盖的目录包，默认位于 `ORBIT_BACKUP_DIR`（`.data/backups`），内容包括：
+备份使用 SQLite `VACUUM INTO` 获取一致性快照，不依赖系统安装 `sqlite3`。每次生成一个新的、拒绝覆盖的目录包，默认位于 `MICRO_LINEAR_BACKUP_DIR`（`.data/backups`），内容包括：
 
-- `orbit.sqlite`：经过完整 `integrity_check` 和外键检查的数据库快照；
+- `micro-linear.sqlite`：经过完整 `integrity_check` 和外键检查的数据库快照；
 - `uploads/`：数据库快照中每条 `files.storage_key` 引用的附件；
 - `manifest.json`：数据库/附件 SHA-256、大小、迁移版本和核心表计数。
 
@@ -123,12 +123,12 @@ npm run db:backups
 
 ```bash
 npm run db:integrity
-npm run db:restore-verify -- --backup .data/backups/orbit-backup-20260711T020000Z-abcd1234
+npm run db:restore-verify -- --backup .data/backups/micro-linear-backup-20260711T020000Z-abcd1234
 ```
 
-`db:restore-verify` 会复制数据库和附件到系统临时目录，验证 manifest、哈希、SQLite 完整性、外键、迁移升级及每个附件引用，默认完成后删除临时目录。它不会覆盖 `ORBIT_DB_PATH` 或 `ORBIT_UPLOAD_DIR`。需要检查成功恢复出的临时文件时可加 `--keep-temporary`。
+`db:restore-verify` 会复制数据库和附件到系统临时目录，验证 manifest、哈希、SQLite 完整性、外键、迁移升级及每个附件引用，默认完成后删除临时目录。它不会覆盖 `MICRO_LINEAR_DB_PATH` 或 `MICRO_LINEAR_UPLOAD_DIR`。需要检查成功恢复出的临时文件时可加 `--keep-temporary`。
 
-建议每天执行 `db:backup`、每周执行 `db:integrity`，并把完整备份目录同步到另一块磁盘或对象存储。正式恢复前：停止 Web 与后台任务；保留当前数据库和 uploads 副本；先通过恢复演练；再把备份内容复制到新的空路径并临时调整 `ORBIT_DB_PATH` / `ORBIT_UPLOAD_DIR` 验证启动。Webhook 加密密钥、认证 pepper 等环境变量不在备份包中，必须由密钥管理系统单独备份。
+建议每天执行 `db:backup`、每周执行 `db:integrity`，并把完整备份目录同步到另一块磁盘或对象存储。正式恢复前：停止 Web 与后台任务；保留当前数据库和 uploads 副本；先通过恢复演练；再把备份内容复制到新的空路径并临时调整 `MICRO_LINEAR_DB_PATH` / `MICRO_LINEAR_UPLOAD_DIR` 验证启动。Webhook 加密密钥、认证 pepper 等环境变量不在备份包中，必须由密钥管理系统单独备份。
 
 ## 请求日志与排障
 
@@ -148,24 +148,28 @@ npm run jobs:run -- --help
 生产环境建议每分钟调用一次，并用系统锁避免同一实例重叠执行。例如 Linux cron：
 
 ```cron
-* * * * * cd /srv/orbit && flock -n /tmp/orbit-jobs.lock npm run jobs:run >> /var/log/orbit-jobs.log 2>&1
+* * * * * cd /srv/micro-linear && flock -n /tmp/micro-linear-jobs.lock npm run jobs:run >> /var/log/micro-linear-jobs.log 2>&1
 ```
 
-执行器本身也会用数据库锁令牌协调并发，失败的 Webhook 按指数退避重试；不可恢复或达到上限的投递会保留 delivery/outbox 错误记录，并使该次 CLI 返回非零状态。Webhook 默认只投递到解析为公网地址的 HTTPS URL，且不跟随重定向。仅本地开发可设置 `ORBIT_WEBHOOK_ALLOW_INSECURE_LOCALHOST=1`。
+执行器本身也会用数据库锁令牌协调并发，失败的 Webhook 按指数退避重试；不可恢复或达到上限的投递会保留 delivery/outbox 错误记录，并使该次 CLI 返回非零状态。Webhook 默认只投递到解析为公网地址的 HTTPS URL，且不跟随重定向。仅本地开发可设置 `MICRO_LINEAR_WEBHOOK_ALLOW_INSECURE_LOCALHOST=1`。
 
-生产环境必须设置并长期保存 `ORBIT_WEBHOOK_ENCRYPTION_KEY`。它用于加密 Webhook 签名密钥；恢复备份时也必须恢复同一个值，否则已有签名密钥无法解密。
+生产环境必须设置并长期保存 `MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY`。它用于加密 Webhook 签名密钥；恢复备份时也必须恢复同一个值，否则已有签名密钥无法解密。
 
 ## 环境变量
 
 复制 `.env.example` 为 `.env.local`。开发环境可以不设置 pepper；生产环境必须使用独立随机值，并在轮换前安排会话失效策略。
 
-`ORBIT_DEMO_MODE=1` 只会在 `next dev` 下允许空库自动载入演示数据，生产模式始终忽略它。建议日常也显式执行 `npm run db:seed`，不要在真实数据环境启用演示模式。
+`MICRO_LINEAR_DEMO_MODE=1` 只会在 `next dev` 下允许空库自动载入演示数据，生产模式始终忽略它。建议日常也显式执行 `npm run db:seed`，不要在真实数据环境启用演示模式。
 
 ```bash
 cp .env.example .env.local
 ```
 
-`npm start` 会先执行安全预检：`APP_URL` 必须是合法公开 Origin（非本机必须 HTTPS），`AUTH_PASSWORD_PEPPER`、`AUTH_TOKEN_PEPPER` 和 `ORBIT_WEBHOOK_ENCRYPTION_KEY` 必须分别使用至少 32 个字符的独立随机值，并且不能启用演示模式。可分别使用 `openssl rand -base64 48` 生成。预检不通过时生产进程会拒绝启动。
+`npm start` 会先执行安全预检：`APP_URL` 必须是合法公开 Origin（非本机必须 HTTPS），`AUTH_PASSWORD_PEPPER`、`AUTH_TOKEN_PEPPER` 和 `MICRO_LINEAR_WEBHOOK_ENCRYPTION_KEY` 必须分别使用至少 32 个字符的独立随机值，并且不能启用演示模式。可分别使用 `openssl rand -base64 48` 生成。预检不通过时生产进程会拒绝启动。
+
+### 旧版本兼容
+
+从旧品牌版本升级时无需立即改动存量数据：应用会继续读取旧 `ORBIT_*` 环境变量、数据库默认路径、Session Cookie、Webhook 加密密文和 v1 备份包；Webhook 投递会同时发送新旧签名 Header，已有 `orb_` API Key 也保持有效。新创建的配置和凭证只使用 Micro Linear 命名。
 
 ## 部署说明
 
@@ -182,12 +186,12 @@ SQLite 和内存 SSE 事件总线要求应用运行在有持久化磁盘的长�
 仓库同时提供单机 Docker Compose 方案：
 
 ```bash
-install -m 600 deploy/orbit.env.example deploy/orbit.env
+install -m 600 deploy/micro-linear.env.example deploy/micro-linear.env
 # 修改 APP_URL 和三个独立随机密钥后：
 docker compose up -d --build
 ```
 
-Compose 会把数据库、附件和备份统一保存在 `orbit-data` 持久卷，并以非 root 用户运行；容器在 Web 服务启动前先执行安全预检和数据库迁移。端口默认只绑定宿主机 `127.0.0.1:3000`，应由同机反向代理提供 TLS。首次访问 `/signup` 创建管理员后，公开注册会自动关闭。后台任务仍应由宿主机 cron 每分钟执行 `docker compose exec -T orbit npm run jobs:run`；备份可用相同方式执行 `npm run db:backup`，并应把备份目录定期同步到卷外或异机存储。
+Compose 会把数据库、附件和备份统一保存在持久卷，并以非 root 用户运行；容器在 Web 服务启动前先执行安全预检和数据库迁移。端口默认只绑定宿主机 `127.0.0.1:3000`，应由同机反向代理提供 TLS。首次访问 `/signup` 创建管理员后，公开注册会自动关闭。后台任务仍应由宿主机 cron 每分钟执行 `docker compose exec -T micro-linear npm run jobs:run`；备份可用相同方式执行 `npm run db:backup`，并应把备份目录定期同步到卷外或异机存储。
 
 ## 功能边界
 

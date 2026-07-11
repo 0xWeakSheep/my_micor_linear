@@ -2,6 +2,8 @@ import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, parse, resolve } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
+import { preferredEnvironmentValue } from "@/lib/runtime-config";
+
 import { migrations } from "./schema";
 
 export type Database = DatabaseSync;
@@ -12,10 +14,17 @@ const globalDatabase = globalThis as typeof globalThis & {
 };
 
 function databasePath(): string {
-  const configured = process.env.ORBIT_DB_PATH?.trim();
-  return configured
-    ? resolve(/* turbopackIgnore: true */ configured)
-    : resolve(".data/orbit.db");
+  const configured = preferredEnvironmentValue(
+    process.env.MICRO_LINEAR_DB_PATH,
+    process.env.ORBIT_DB_PATH,
+  );
+  if (configured) return resolve(/* turbopackIgnore: true */ configured);
+
+  const currentDefault = resolve(".data/micro-linear.db");
+  const legacyDefault = resolve(".data/orbit.db");
+  return existsSync(currentDefault) || !existsSync(legacyDefault)
+    ? currentDefault
+    : legacyDefault;
 }
 
 function migrate(database: DatabaseSync): void {
@@ -53,7 +62,7 @@ function openDatabase(): DatabaseSync {
   const path = databasePath();
   const directory = dirname(path);
   if (directory === parse(directory).root) {
-    throw new Error("ORBIT_DB_PATH must place the database inside a dedicated directory.");
+    throw new Error("MICRO_LINEAR_DB_PATH must place the database inside a dedicated directory.");
   }
   process.umask(0o077);
   mkdirSync(/* turbopackIgnore: true */ directory, { recursive: true, mode: 0o700 });
