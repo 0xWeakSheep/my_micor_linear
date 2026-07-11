@@ -126,6 +126,24 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("CreateIssueDialog templates", () => {
+  it("applies team and status defaults supplied by a board column", async () => {
+    workspace.useWorkspace.mockReturnValue({
+      data: dialogData(),
+      createIssueOpen: true,
+      createIssueDefaults: { teamId: "team_main", statusId: "state_triage" },
+      setCreateIssueOpen: vi.fn(),
+      setSelectedIssueId: vi.fn(),
+      mutate: vi.fn(),
+    });
+
+    render(<CreateIssueDialog />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "状态" })).toHaveValue("state_triage");
+    });
+    expect(screen.getByRole("combobox", { name: "团队" })).toHaveValue("team_main");
+  });
+
   it("applies the selected template and submits defaults plus sub-issues", async () => {
     const mutate = vi.fn().mockResolvedValue(createdIssue);
     const setCreateIssueOpen = vi.fn();

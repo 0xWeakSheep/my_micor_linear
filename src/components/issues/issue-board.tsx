@@ -202,7 +202,11 @@ export function IssueBoard({
               dragActive={Boolean(activeIssue)}
               canDrop={canDrop}
               onOpen={setSelectedIssueId}
-              onCreate={() => setCreateIssueOpen(true)}
+              onCreate={() => setCreateIssueOpen(true, {
+                ...(column.statusId
+                  ? { teamId: column.state.teamId, statusId: column.statusId }
+                  : { statusType: column.statusType ?? undefined }),
+              })}
             />
           );
         })}

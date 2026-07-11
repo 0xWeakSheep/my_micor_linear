@@ -18,6 +18,7 @@ import type {
   Issue,
   LayoutMode,
   ViewFilters,
+  WorkflowStateType,
 } from "@/lib/domain";
 
 export interface WorkspacePreferences {
@@ -35,6 +36,14 @@ interface MutationOptions {
   refresh?: boolean;
 }
 
+export interface CreateIssueDefaults {
+  teamId?: string;
+  statusId?: string;
+  statusType?: WorkflowStateType;
+  projectId?: string;
+  cycleId?: string;
+}
+
 interface WorkspaceContextValue {
   data: BootstrapData;
   updatingIssueIds: ReadonlySet<string>;
@@ -43,12 +52,13 @@ interface WorkspaceContextValue {
   selectedIssueIds: Set<string>;
   commandOpen: boolean;
   createIssueOpen: boolean;
+  createIssueDefaults: CreateIssueDefaults | null;
   setPreferences: (patch: Partial<WorkspacePreferences>) => void;
   setSelectedIssueId: (issueId: string | null) => void;
   setSelectedIssueIds: (issueIds: Set<string>) => void;
   toggleIssueSelection: (issueId: string, additive?: boolean) => void;
   setCommandOpen: (open: boolean) => void;
-  setCreateIssueOpen: (open: boolean) => void;
+  setCreateIssueOpen: (open: boolean, defaults?: CreateIssueDefaults) => void;
   refresh: () => Promise<void>;
   mutate: <T>(action: string, payload: unknown, options?: MutationOptions) => Promise<T | null>;
   updateIssue: (issueId: string, changes: Partial<Issue>) => Promise<boolean>;
@@ -83,7 +93,8 @@ export function WorkspaceProvider({
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(() => new Set());
   const [commandOpen, setCommandOpen] = useState(false);
-  const [createIssueOpen, setCreateIssueOpen] = useState(false);
+  const [createIssueOpen, setCreateIssueOpenState] = useState(false);
+  const [createIssueDefaults, setCreateIssueDefaults] = useState<CreateIssueDefaults | null>(null);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preferenceKey = `micro-linear:preferences:${initialData.workspace.id}`;
@@ -124,6 +135,14 @@ export function WorkspaceProvider({
       });
     },
     [preferenceKey],
+  );
+
+  const setCreateIssueOpen = useCallback(
+    (open: boolean, defaults?: CreateIssueDefaults) => {
+      setCreateIssueDefaults(open ? defaults ?? null : null);
+      setCreateIssueOpenState(open);
+    },
+    [],
   );
 
   const refresh = useCallback(async () => {
@@ -205,7 +224,7 @@ export function WorkspaceProvider({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [setCreateIssueOpen]);
 
   const mutate = useCallback(
     async <T,>(
@@ -342,6 +361,7 @@ export function WorkspaceProvider({
       selectedIssueIds,
       commandOpen,
       createIssueOpen,
+      createIssueDefaults,
       setPreferences,
       setSelectedIssueId,
       setSelectedIssueIds,
@@ -360,7 +380,9 @@ export function WorkspaceProvider({
       selectedIssueIds,
       commandOpen,
       createIssueOpen,
+      createIssueDefaults,
       setPreferences,
+      setCreateIssueOpen,
       toggleIssueSelection,
       refresh,
       mutate,

@@ -224,19 +224,25 @@ afterEach(cleanup);
 describe("IssueBoard drag status", () => {
   it("renders every workflow state and exposes a unique drag handle", () => {
     const currentIssue = issue("eng-1", "engineering", "eng_todo");
+    const setCreateIssueOpen = vi.fn();
     workspace.useWorkspace.mockReturnValue({
       data: boardData([currentIssue]),
       preferences: { sortBy: "manual" },
       updateIssue: vi.fn(),
       updatingIssueIds: new Set(),
       setSelectedIssueId: vi.fn(),
-      setCreateIssueOpen: vi.fn(),
+      setCreateIssueOpen,
     });
 
     render(<IssueBoard issues={[currentIssue]} scopeTeamIds={["engineering"]} />);
 
     expect(screen.getByRole("region", { name: "状态列 Canceled" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "拖动 ENG-1" })).toBeInTheDocument();
+    screen.getByRole("button", { name: "在 Todo 中新建" }).click();
+    expect(setCreateIssueOpen).toHaveBeenCalledWith(true, {
+      teamId: "engineering",
+      statusId: "eng_todo",
+    });
   });
 
   it("applies triage acceptance fields when a card moves to Todo", async () => {

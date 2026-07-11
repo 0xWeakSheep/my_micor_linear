@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { CalendarDays, ChevronDown, Command, FileText, Loader2, Plus, Tag, X } from "lucide-react";
 import type { Issue } from "@/lib/domain";
@@ -17,6 +17,7 @@ export function CreateIssueDialog() {
   const {
     data,
     createIssueOpen,
+    createIssueDefaults,
     setCreateIssueOpen,
     setSelectedIssueId,
     mutate,
@@ -39,6 +40,7 @@ export function CreateIssueDialog() {
   const [estimate, setEstimate] = useState<number | null>(null);
   const [dueDate, setDueDate] = useState("");
   const [loading, setLoading] = useState(false);
+  const appliedDefaultsRef = useRef<typeof createIssueDefaults>(null);
   const effectiveStatusId = availableStates.some((state) => state.id === statusId)
     ? statusId
     : (availableStates.find((state) => state.type === "unstarted") ?? availableStates[0])?.id ?? "";
@@ -47,6 +49,54 @@ export function CreateIssueDialog() {
     [data.templates, teamId],
   );
   const selectedTemplate = availableTemplates.find((template) => template.id === templateId);
+
+  useEffect(() => {
+    if (!createIssueOpen) {
+      appliedDefaultsRef.current = null;
+      return;
+    }
+    if (!createIssueDefaults || appliedDefaultsRef.current === createIssueDefaults) return;
+    appliedDefaultsRef.current = createIssueDefaults;
+
+    const requestedState = createIssueDefaults.statusId
+      ? data.states.find((state) => state.id === createIssueDefaults.statusId)
+      : undefined;
+    const nextTeamId = data.teams.some((team) => team.id === createIssueDefaults.teamId)
+      ? createIssueDefaults.teamId!
+      : requestedState?.teamId ?? data.teams[0]?.id ?? "";
+    const nextStates = data.states
+      .filter((state) => state.teamId === nextTeamId)
+      .toSorted((left, right) => left.position - right.position);
+    const nextStatus = requestedState?.teamId === nextTeamId
+      ? requestedState
+      : nextStates.find((state) => state.type === createIssueDefaults.statusType) ??
+        nextStates.find((state) => state.type === "unstarted") ??
+        nextStates[0];
+
+    setTeamId(nextTeamId);
+    setStatusId(nextStatus?.id ?? "");
+    setTemplateId("");
+    setProjectId(
+      data.projects.some((project) => project.id === createIssueDefaults.projectId)
+        ? createIssueDefaults.projectId!
+        : "",
+    );
+    setMilestoneId("");
+    setCycleId(
+      data.cycles.some(
+        (cycle) => cycle.id === createIssueDefaults.cycleId && cycle.teamId === nextTeamId,
+      )
+        ? createIssueDefaults.cycleId!
+        : "",
+    );
+  }, [
+    createIssueDefaults,
+    createIssueOpen,
+    data.cycles,
+    data.projects,
+    data.states,
+    data.teams,
+  ]);
 
   function changeTeam(nextTeamId: string) {
     setTeamId(nextTeamId);
