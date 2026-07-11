@@ -8,7 +8,6 @@ import {
   KeyboardSensor,
   MouseSensor,
   TouchSensor,
-  useDraggable,
   useDroppable,
   useSensor,
   useSensors,
@@ -18,6 +17,12 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { CalendarDays, GripVertical, LoaderCircle, MessageSquare, Plus } from "lucide-react";
 import { formatDistanceToNowStrict, parseISO } from "date-fns";
@@ -29,6 +34,7 @@ import { useWorkspace } from "@/components/workspace/workspace-provider";
 import { PriorityIcon, StateIcon, UserAvatar } from "./issue-glyphs";
 import {
   buildIssueBoardColumns,
+  calculateIssueSortOrder,
   resolveIssueBoardStatus,
 } from "./issue-board-model";
 
@@ -49,6 +55,14 @@ const announcements: Announcements = {
   },
 };
 
+function isAfterOver(event: DragEndEvent): boolean {
+  const translated = event.active.rect.current.translated;
+  if (!translated || !event.over) return false;
+  const activeCenter = translated.top + translated.height / 2;
+  const overCenter = event.over.rect.top + event.over.rect.height / 2;
+  return activeCenter > overCenter;
+}
+
 export function IssueBoard({
   issues,
   scopeTeamIds,
@@ -58,6 +72,7 @@ export function IssueBoard({
 }) {
   const {
     data,
+    preferences,
     updateIssue,
     setSelectedIssueId,
     setCreateIssueOpen,
@@ -69,7 +84,7 @@ export function IssueBoard({
     useSensor(TouchSensor, {
       activationConstraint: { delay: 180, tolerance: 6 },
     }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const columns = useMemo(
     () => buildIssueBoardColumns(issues, data.states, scopeTeamIds),
@@ -93,6 +108,7 @@ export function IssueBoard({
     if (!issue) return;
     const statusId = event.over.data.current?.statusId;
     const statusType = event.over.data.current?.statusType as WorkflowStateType | null | undefined;
+    const columnId = event.over.data.current?.columnId;
     const nextStatusId = resolveIssueBoardStatus(
       issue,
       {
@@ -106,21 +122,44 @@ export function IssueBoard({
       setMoveAnnouncement(`${issue.identifier} 无法移至 ${targetLabel}。`);
       return;
     }
-    if (issue.statusId === nextStatusId) {
-      setMoveAnnouncement(`${issue.identifier} 已在 ${targetLabel}，状态未改变。`);
-      return;
-    }
-
     const currentState = data.states.find((state) => state.id === issue.statusId);
     const targetState = data.states.find((state) => state.id === nextStatusId);
     if (!targetState) return;
+    const statusChanged = issue.statusId !== nextStatusId;
+    const targetColumn = typeof columnId === "string"
+      ? columns.find((column) => column.id === columnId)
+      : undefined;
+    const overIssueId = event.over.data.current?.issueId;
+    const sortOrder = preferences.sortBy === "manual" && targetColumn
+      ? calculateIssueSortOrder(
+          issues
+            .filter((item) => targetColumn.stateIds.includes(item.statusId))
+            .toSorted((left, right) => left.sortOrder - right.sortOrder),
+          issue,
+          typeof overIssueId === "string" ? overIssueId : null,
+          isAfterOver(event),
+        )
+      : null;
+    if (!statusChanged && sortOrder === null) {
+      setMoveAnnouncement(`${issue.identifier} 已在 ${targetLabel}，状态和顺序未改变。`);
+      return;
+    }
+
+    const changes: Partial<Issue> = getIssueStatusTransitionChanges(
+      issue,
+      currentState,
+      targetState,
+    );
+    if (sortOrder !== null) changes.sortOrder = sortOrder;
     const success = await updateIssue(
       issueId,
-      getIssueStatusTransitionChanges(issue, currentState, targetState),
+      changes,
     );
     setMoveAnnouncement(
       success
-        ? `${issue.identifier} 已移至 ${targetLabel}。`
+        ? statusChanged
+          ? `${issue.identifier} 已移至 ${targetLabel}。`
+          : `${issue.identifier} 在 ${targetLabel} 中的顺序已更新。`
         : `${issue.identifier} 移动失败，已恢复原状态。`,
     );
   }
@@ -207,7 +246,7 @@ function BoardColumn({
   const { data, updatingIssueIds } = useWorkspace();
   const { setNodeRef, isOver } = useDroppable({
     id: `column:${columnId}`,
-    data: { statusId, statusType, label },
+    data: { columnId, statusId, statusType, label },
     disabled: dragActive && !canDrop,
   });
 
@@ -237,15 +276,25 @@ function BoardColumn({
         )}
       </header>
       <div className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
-        {issues.map((issue) => (
-          <DraggableIssueCard
-            key={issue.id}
-            issue={issue}
-            state={data.states.find((item) => item.id === issue.statusId)}
-            pending={updatingIssueIds.has(issue.id)}
-            onOpen={() => onOpen(issue.id)}
-          />
-        ))}
+        <SortableContext
+          items={issues.map((issue) => issue.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {issues.map((issue) => (
+            <DraggableIssueCard
+              key={issue.id}
+              issue={issue}
+              state={data.states.find((item) => item.id === issue.statusId)}
+              columnId={columnId}
+              columnStatusId={statusId}
+              columnStatusType={statusType}
+              columnLabel={label}
+              canDrop={canDrop}
+              pending={updatingIssueIds.has(issue.id)}
+              onOpen={() => onOpen(issue.id)}
+            />
+          ))}
+        </SortableContext>
         {issues.length === 0 ? (
           <button type="button" onClick={onCreate} className="grid h-20 place-items-center rounded-md border border-dashed border-border text-xs text-tertiary transition-colors hover:border-border-strong hover:bg-surface-hover">
             添加 Issue
@@ -259,11 +308,21 @@ function BoardColumn({
 function DraggableIssueCard({
   issue,
   state,
+  columnId,
+  columnStatusId,
+  columnStatusType,
+  columnLabel,
+  canDrop,
   pending,
   onOpen,
 }: {
   issue: Issue;
   state: WorkflowState | undefined;
+  columnId: string;
+  columnStatusId: string | null;
+  columnStatusType: WorkflowStateType | null;
+  columnLabel: string;
+  canDrop: boolean;
   pending: boolean;
   onOpen: () => void;
 }) {
@@ -273,16 +332,24 @@ function DraggableIssueCard({
     setNodeRef,
     setActivatorNodeRef,
     transform,
+    transition,
     isDragging,
-  } = useDraggable({
+  } = useSortable({
     id: issue.id,
-    data: { identifier: issue.identifier },
-    disabled: pending,
+    data: {
+      issueId: issue.id,
+      identifier: issue.identifier,
+      columnId,
+      statusId: columnStatusId,
+      statusType: columnStatusType,
+      label: columnLabel,
+    },
+    disabled: { draggable: pending, droppable: !canDrop },
   });
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform) }}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn("transition-opacity", isDragging && "opacity-20")}
       data-issue-card={issue.identifier}
     >

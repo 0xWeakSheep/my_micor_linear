@@ -104,3 +104,35 @@ export function resolveIssueBoardStatus(
     )
     .toSorted((left, right) => left.position - right.position)[0]?.id ?? null;
 }
+
+export function calculateIssueSortOrder(
+  columnIssues: Issue[],
+  activeIssue: Pick<Issue, "id" | "sortOrder">,
+  overIssueId: string | null,
+  placeAfter: boolean,
+): number | null {
+  const originalIds = columnIssues.map((issue) => issue.id);
+  const candidates = columnIssues.filter((issue) => issue.id !== activeIssue.id);
+  const overIndex = overIssueId
+    ? candidates.findIndex((issue) => issue.id === overIssueId)
+    : -1;
+  const insertionIndex = overIndex >= 0
+    ? Math.min(candidates.length, overIndex + (placeAfter ? 1 : 0))
+    : candidates.length;
+  const projectedIds = candidates.map((issue) => issue.id);
+  projectedIds.splice(insertionIndex, 0, activeIssue.id);
+
+  if (
+    originalIds.length === projectedIds.length &&
+    originalIds.every((id, index) => id === projectedIds[index])
+  ) {
+    return null;
+  }
+
+  const previous = candidates[insertionIndex - 1];
+  const next = candidates[insertionIndex];
+  if (previous && next) return (previous.sortOrder + next.sortOrder) / 2;
+  if (previous) return previous.sortOrder + 1_024;
+  if (next) return next.sortOrder - 1_024;
+  return activeIssue.sortOrder;
+}

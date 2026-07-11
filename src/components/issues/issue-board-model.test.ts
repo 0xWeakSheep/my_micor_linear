@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Issue, WorkflowState } from "@/lib/domain";
 import {
   buildIssueBoardColumns,
+  calculateIssueSortOrder,
   resolveIssueBoardStatus,
 } from "./issue-board-model";
 
@@ -146,5 +147,31 @@ describe("issue board model", () => {
     );
 
     expect(nextStatusId).toBeNull();
+  });
+});
+
+describe("issue board manual ordering", () => {
+  const first = { ...issue("first", "engineering", "eng_todo"), sortOrder: 1_024 };
+  const second = { ...issue("second", "engineering", "eng_todo"), sortOrder: 2_048 };
+  const third = { ...issue("third", "engineering", "eng_todo"), sortOrder: 3_072 };
+
+  it("uses a midpoint when inserting between two cards", () => {
+    expect(
+      calculateIssueSortOrder([first, second, third], third, "second", false),
+    ).toBe(1_536);
+  });
+
+  it("allocates space before the first and after the last card", () => {
+    expect(calculateIssueSortOrder([first, second], second, "first", false)).toBe(0);
+    expect(calculateIssueSortOrder([first, second], first, null, true)).toBe(3_072);
+  });
+
+  it("returns null when the projected position is unchanged", () => {
+    expect(calculateIssueSortOrder([first, second, third], second, "first", true)).toBeNull();
+    expect(calculateIssueSortOrder([first, second, third], third, null, true)).toBeNull();
+  });
+
+  it("keeps the existing order value when moving into an empty column", () => {
+    expect(calculateIssueSortOrder([], second, null, true)).toBe(second.sortOrder);
   });
 });

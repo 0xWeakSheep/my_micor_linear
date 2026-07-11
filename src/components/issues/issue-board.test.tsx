@@ -76,8 +76,44 @@ vi.mock("@dnd-kit/core", async () => {
 });
 
 vi.mock("@dnd-kit/utilities", () => ({
-  CSS: { Translate: { toString: () => undefined } },
+  CSS: { Transform: { toString: () => undefined } },
 }));
+
+vi.mock("@dnd-kit/sortable", async () => {
+  const React = await import("react");
+  return {
+    sortableKeyboardCoordinates: vi.fn(),
+    verticalListSortingStrategy: vi.fn(),
+    SortableContext: ({ children }: { children?: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
+    useSortable: ({
+      id,
+      disabled,
+    }: {
+      id: string;
+      disabled?: boolean | { draggable?: boolean; droppable?: boolean };
+    }) => {
+      const dragDisabled = typeof disabled === "boolean" ? disabled : Boolean(disabled?.draggable);
+      dnd.draggables.set(String(id), { disabled: dragDisabled });
+      return {
+        attributes: {
+          role: "button",
+          tabIndex: 0,
+          "aria-disabled": dragDisabled,
+          "aria-pressed": false,
+          "aria-roledescription": "sortable",
+          "aria-describedby": "drag-description",
+        },
+        listeners: { onKeyDown: vi.fn() },
+        setNodeRef: vi.fn(),
+        setActivatorNodeRef: vi.fn(),
+        transform: null,
+        transition: undefined,
+        isDragging: false,
+      };
+    },
+  };
+});
 
 import { IssueBoard } from "./issue-board";
 
@@ -153,11 +189,26 @@ function dragStart(issueId: string): DragStartEvent {
 
 function dragEnd(
   issueId: string,
-  target: { statusId: string | null; statusType: WorkflowState["type"] | null; label: string } | null,
+  target: {
+    statusId: string | null;
+    statusType: WorkflowState["type"] | null;
+    label: string;
+    columnId?: string;
+    issueId?: string;
+  } | null,
 ): DragEndEvent {
   return {
-    active: { id: issueId },
-    over: target ? { id: `column:${target.statusId ?? target.statusType}`, data: { current: target } } : null,
+    active: {
+      id: issueId,
+      rect: { current: { translated: { top: 0, height: 20 } } },
+    },
+    over: target
+      ? {
+          id: `column:${target.statusId ?? target.statusType}`,
+          data: { current: target },
+          rect: { top: 100, height: 40 },
+        }
+      : null,
   } as unknown as DragEndEvent;
 }
 
@@ -175,6 +226,7 @@ describe("IssueBoard drag status", () => {
     const currentIssue = issue("eng-1", "engineering", "eng_todo");
     workspace.useWorkspace.mockReturnValue({
       data: boardData([currentIssue]),
+      preferences: { sortBy: "manual" },
       updateIssue: vi.fn(),
       updatingIssueIds: new Set(),
       setSelectedIssueId: vi.fn(),
@@ -192,6 +244,7 @@ describe("IssueBoard drag status", () => {
     const updateIssue = vi.fn().mockResolvedValue(true);
     workspace.useWorkspace.mockReturnValue({
       data: boardData([currentIssue]),
+      preferences: { sortBy: "manual" },
       updateIssue,
       updatingIssueIds: new Set(),
       setSelectedIssueId: vi.fn(),
@@ -221,6 +274,7 @@ describe("IssueBoard drag status", () => {
     const updateIssue = vi.fn().mockResolvedValue(true);
     workspace.useWorkspace.mockReturnValue({
       data: boardData([reviewIssue, designIssue]),
+      preferences: { sortBy: "manual" },
       updateIssue,
       updatingIssueIds: new Set(),
       setSelectedIssueId: vi.fn(),
@@ -235,7 +289,7 @@ describe("IssueBoard drag status", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("状态未改变");
+      expect(screen.getByRole("status")).toHaveTextContent("状态和顺序未改变");
     });
     expect(updateIssue).not.toHaveBeenCalled();
   });
@@ -245,6 +299,7 @@ describe("IssueBoard drag status", () => {
     const operationsIssue = issue("ops-1", "operations", "ops_todo");
     workspace.useWorkspace.mockReturnValue({
       data: boardData([engineeringIssue, operationsIssue]),
+      preferences: { sortBy: "manual" },
       updateIssue: vi.fn(),
       updatingIssueIds: new Set(),
       setSelectedIssueId: vi.fn(),
@@ -261,10 +316,46 @@ describe("IssueBoard drag status", () => {
     );
   });
 
+  it("persists a manual order when a card moves before another card", async () => {
+    const first = { ...issue("eng-1", "engineering", "eng_todo"), sortOrder: 100 };
+    const second = { ...issue("eng-2", "engineering", "eng_todo"), sortOrder: 200 };
+    const updateIssue = vi.fn().mockResolvedValue(true);
+    workspace.useWorkspace.mockReturnValue({
+      data: boardData([first, second]),
+      preferences: { sortBy: "manual" },
+      updateIssue,
+      updatingIssueIds: new Set(),
+      setSelectedIssueId: vi.fn(),
+      setCreateIssueOpen: vi.fn(),
+    });
+    render(<IssueBoard issues={[first, second]} scopeTeamIds={["engineering"]} />);
+
+    act(() => {
+      dnd.contextProps?.onDragEnd?.(
+        dragEnd("eng-2", {
+          statusId: "eng_todo",
+          statusType: null,
+          label: "Todo",
+          columnId: "eng_todo",
+          issueId: "eng-1",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(updateIssue).toHaveBeenCalledWith("eng-2", {
+        statusId: "eng_todo",
+        sortOrder: -924,
+      });
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("顺序已更新");
+  });
+
   it("disables dragging while an issue update is pending", () => {
     const currentIssue = issue("eng-1", "engineering", "eng_todo");
     workspace.useWorkspace.mockReturnValue({
       data: boardData([currentIssue]),
+      preferences: { sortBy: "manual" },
       updateIssue: vi.fn(),
       updatingIssueIds: new Set([currentIssue.id]),
       setSelectedIssueId: vi.fn(),
