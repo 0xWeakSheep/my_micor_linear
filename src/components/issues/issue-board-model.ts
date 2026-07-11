@@ -34,11 +34,9 @@ export interface IssueBoardDropTarget {
 
 function visibleStates(issues: Issue[], states: WorkflowState[]): WorkflowState[] {
   const teamIds = new Set(issues.map((issue) => issue.teamId));
-  const stateIdsWithIssues = new Set(issues.map((issue) => issue.statusId));
 
   return states
     .filter((state) => teamIds.size === 0 || teamIds.has(state.teamId))
-    .filter((state) => state.type !== "canceled" || stateIdsWithIssues.has(state.id))
     .toSorted((left, right) => left.position - right.position);
 }
 
@@ -89,6 +87,11 @@ export function resolveIssueBoardStatus(
   }
 
   if (!target.statusType) return null;
+
+  const currentState = states.find(
+    (state) => state.id === issue.statusId && state.teamId === issue.teamId,
+  );
+  if (currentState?.type === target.statusType) return currentState.id;
 
   return states
     .filter(

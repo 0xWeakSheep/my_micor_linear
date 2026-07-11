@@ -65,7 +65,7 @@ const states = [
 ] satisfies WorkflowState[];
 
 describe("issue board model", () => {
-  it("keeps a single team's workflow order and hides an unused canceled state", () => {
+  it("keeps every single-team workflow state available as a drop target", () => {
     const columns = buildIssueBoardColumns(
       [issue("eng-1", "engineering", "eng_progress")],
       states,
@@ -76,21 +76,13 @@ describe("issue board model", () => {
       "eng_progress",
       "eng_review",
       "eng_done",
+      "eng_canceled",
     ]);
     expect(columns[0]).toMatchObject({
       statusId: "eng_todo",
       statusType: null,
       stateIds: ["eng_todo"],
     });
-  });
-
-  it("keeps a canceled column visible while it contains an issue", () => {
-    const columns = buildIssueBoardColumns(
-      [issue("eng-1", "engineering", "eng_canceled")],
-      states,
-    );
-
-    expect(columns.map((column) => column.id)).toContain("eng_canceled");
   });
 
   it("groups multiple teams by workflow type without losing team-specific states", () => {
@@ -106,6 +98,7 @@ describe("issue board model", () => {
       "type:unstarted",
       "type:started",
       "type:completed",
+      "type:canceled",
     ]);
     expect(columns.find((column) => column.id === "type:started")).toMatchObject({
       label: "In Progress",
@@ -123,6 +116,16 @@ describe("issue board model", () => {
     );
 
     expect(nextStatusId).toBe("eng_progress");
+  });
+
+  it("keeps the current state when dropping within the same aggregate type", () => {
+    const nextStatusId = resolveIssueBoardStatus(
+      issue("eng-1", "engineering", "eng_review"),
+      { statusType: "started" },
+      states,
+    );
+
+    expect(nextStatusId).toBe("eng_review");
   });
 
   it("rejects explicit states from a different team", () => {
