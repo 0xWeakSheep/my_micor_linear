@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+.data
+outputs
+work
+test-results
+playwright-report
+coverage
+.env*
+deploy/orbit.env
+npm-debug.log*

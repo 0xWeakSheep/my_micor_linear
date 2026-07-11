@@ -1,0 +1,18 @@
+services:
+  orbit:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - ./deploy/orbit.env
+    environment:
+      NODE_ENV: production
+      ORBIT_DB_PATH: /app/.data/orbit.db
+      ORBIT_UPLOAD_DIR: /app/.data/uploads
+      ORBIT_BACKUP_DIR: /app/.data/backups
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - orbit-data:/app/.data
+
+volumes:
+  orbit-data:
