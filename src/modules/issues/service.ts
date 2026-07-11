@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Database } from "@/lib/db";
 import { getDatabase, transaction, type BindValue } from "@/lib/db";
-import type { Comment, Issue, IssueRelation, Reaction } from "@/lib/domain";
+import type { Comment, Issue, IssueRelation, Reaction, WorkflowState } from "@/lib/domain";
 import {
   getTeamPermissionContext,
   hasTeamPermission,
@@ -10,6 +10,7 @@ import {
   requireTeamPermission,
 } from "@/lib/auth";
 import { createId } from "@/lib/security";
+import { getIssueStatusTransitionChanges } from "@/modules/issues/logic";
 import {
   ConflictError,
   createNotification,
@@ -468,7 +469,7 @@ function applyIssueChanges(
 ): Issue {
   const targetTeamId = changes.teamId ?? issue.team_id;
   const movingTeams = targetTeamId !== issue.team_id;
-  const normalizedChanges: z.infer<typeof issueChangesSchema> = movingTeams
+  const teamNormalizedChanges: z.infer<typeof issueChangesSchema> = movingTeams
     ? {
         ...changes,
         statusId:
@@ -486,6 +487,34 @@ function applyIssueChanges(
         cycleId: changes.cycleId === undefined ? null : changes.cycleId,
       }
     : changes;
+  const targetStatus = teamNormalizedChanges.statusId
+    ? database
+        .prepare("SELECT id, type FROM workflow_states WHERE id = ?")
+        .get(teamNormalizedChanges.statusId) as
+        | { id: string; type: WorkflowState["type"] }
+        | undefined
+    : undefined;
+  const currentStatus = targetStatus
+    ? database
+        .prepare("SELECT type FROM workflow_states WHERE id = ?")
+        .get(issue.status_id) as { type: WorkflowState["type"] } | undefined
+    : undefined;
+  const statusTransition = targetStatus
+    ? getIssueStatusTransitionChanges(
+        { triageStatus: issue.triage_status },
+        currentStatus,
+        targetStatus,
+      )
+    : undefined;
+  const normalizedChanges: z.infer<typeof issueChangesSchema> = {
+    ...teamNormalizedChanges,
+    ...(teamNormalizedChanges.triageStatus === undefined && statusTransition?.triageStatus !== undefined
+      ? { triageStatus: statusTransition.triageStatus }
+      : {}),
+    ...(teamNormalizedChanges.snoozedUntil === undefined && statusTransition?.snoozedUntil !== undefined
+      ? { snoozedUntil: statusTransition.snoozedUntil }
+      : {}),
+  };
   if (movingTeams && !normalizedChanges.statusId) {
     throw new DomainValidationError("Target team does not have a workflow state.");
   }

@@ -1,4 +1,4 @@
-import type { Id, Issue } from "../../lib/domain";
+import type { Id, Issue, WorkflowState } from "../../lib/domain";
 
 export type IssuePriority = Issue["priority"];
 
@@ -26,6 +26,36 @@ export function getIssuePriorityLabel(priority: IssuePriority): string {
 
 export function getIssuePriorityRank(priority: IssuePriority): number {
   return ISSUE_PRIORITY_METADATA[priority].rank;
+}
+
+export type IssueStatusTransitionChanges = Pick<Issue, "statusId"> &
+  Partial<Pick<Issue, "triageStatus" | "snoozedUntil">>;
+
+export function getIssueStatusTransitionChanges(
+  issue: Pick<Issue, "triageStatus">,
+  currentState: Pick<WorkflowState, "type"> | undefined,
+  targetState: Pick<WorkflowState, "id" | "type">,
+): IssueStatusTransitionChanges {
+  if (targetState.type === "triage") {
+    return {
+      statusId: targetState.id,
+      triageStatus: "pending",
+      snoozedUntil: null,
+    };
+  }
+
+  const needsTriageResolution =
+    currentState?.type === "triage" ||
+    issue.triageStatus === "pending" ||
+    issue.triageStatus === "snoozed";
+
+  if (!needsTriageResolution) return { statusId: targetState.id };
+
+  return {
+    statusId: targetState.id,
+    triageStatus: targetState.type === "canceled" ? "declined" : "accepted",
+    snoozedUntil: null,
+  };
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   findIssueParentCycle,
   getIssuePriorityLabel,
   getIssuePriorityRank,
+  getIssueStatusTransitionChanges,
   hasIssueParentCycle,
   ISSUE_PRIORITY_METADATA,
   wouldCreateIssueParentCycle,
@@ -34,6 +35,60 @@ describe("issue priority metadata", () => {
     expect(ISSUE_PRIORITY_METADATA[1].rank).toBeLessThan(
       ISSUE_PRIORITY_METADATA[4].rank,
     );
+  });
+});
+
+describe("issue status transitions", () => {
+  it("accepts pending triage when moving into normal workflow", () => {
+    expect(
+      getIssueStatusTransitionChanges(
+        { triageStatus: "pending" },
+        { type: "triage" },
+        { id: "todo", type: "unstarted" },
+      ),
+    ).toEqual({
+      statusId: "todo",
+      triageStatus: "accepted",
+      snoozedUntil: null,
+    });
+  });
+
+  it("declines pending triage when moving into a canceled state", () => {
+    expect(
+      getIssueStatusTransitionChanges(
+        { triageStatus: "snoozed" },
+        { type: "triage" },
+        { id: "canceled", type: "canceled" },
+      ),
+    ).toEqual({
+      statusId: "canceled",
+      triageStatus: "declined",
+      snoozedUntil: null,
+    });
+  });
+
+  it("marks an issue pending when it enters triage", () => {
+    expect(
+      getIssueStatusTransitionChanges(
+        { triageStatus: null },
+        { type: "unstarted" },
+        { id: "triage", type: "triage" },
+      ),
+    ).toEqual({
+      statusId: "triage",
+      triageStatus: "pending",
+      snoozedUntil: null,
+    });
+  });
+
+  it("leaves resolved triage metadata unchanged during normal moves", () => {
+    expect(
+      getIssueStatusTransitionChanges(
+        { triageStatus: "accepted" },
+        { type: "unstarted" },
+        { id: "started", type: "started" },
+      ),
+    ).toEqual({ statusId: "started" });
   });
 });
 

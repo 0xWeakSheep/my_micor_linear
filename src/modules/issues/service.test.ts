@@ -86,12 +86,15 @@ function fixture(): void {
       `INSERT INTO workflow_states(
         id, team_id, name, type, color, position, is_default, created_at
       ) VALUES
+        ('state_triage', 'team_main', 'Triage', 'triage', '#777', 0, 0, ?),
         ('state_backlog', 'team_main', 'Backlog', 'backlog', '#888', 100, 1, ?),
-        ('state_duplicate', 'team_main', 'Duplicate', 'canceled', '#999', 200, 0, ?),
+        ('state_todo', 'team_main', 'Todo', 'unstarted', '#aaa', 200, 0, ?),
+        ('state_completed', 'team_main', 'Done', 'completed', '#5b8', 300, 0, ?),
+        ('state_duplicate', 'team_main', 'Duplicate', 'canceled', '#999', 400, 0, ?),
         ('state_private', 'team_private', 'Backlog', 'backlog', '#888', 100, 1, ?),
         ('state_other', 'team_other', 'Todo', 'unstarted', '#777', 100, 1, ?)`,
     )
-    .run(now, now, now, now);
+    .run(now, now, now, now, now, now, now);
   database
     .prepare(
       `INSERT INTO issues(
@@ -429,6 +432,71 @@ describe("issue archive and trash", () => {
 });
 
 describe("issue planning properties", () => {
+  it("keeps triage metadata consistent with workflow status changes", () => {
+    const database = getDatabase();
+    database
+      .prepare(
+        `UPDATE issues
+            SET status_id = 'state_triage', triage_status = 'pending',
+                snoozed_until = '2026-07-12T00:00:00.000Z'
+          WHERE id = 'issue_a'`,
+      )
+      .run();
+
+    const accepted = executeIssueAction("issue.update", "ws_test", "usr_author", {
+      issueId: "issue_a",
+      changes: { statusId: "state_todo" },
+    }) as MutationResult<Issue>;
+    expect(accepted.data).toMatchObject({
+      statusId: "state_todo",
+      triageStatus: "accepted",
+      snoozedUntil: null,
+    });
+
+    executeIssueAction("issue.update", "ws_test", "usr_author", {
+      issueId: "issue_a",
+      changes: { statusId: "state_triage" },
+    });
+    const declined = executeIssueAction("issue.update", "ws_test", "usr_author", {
+      issueId: "issue_a",
+      changes: { statusId: "state_duplicate" },
+    }) as MutationResult<Issue>;
+    expect(declined.data).toMatchObject({
+      statusId: "state_duplicate",
+      triageStatus: "declined",
+      snoozedUntil: null,
+    });
+    expect(declined.data.canceledAt).not.toBeNull();
+  });
+
+  it("marks issues pending when they enter triage", () => {
+    const moved = executeIssueAction("issue.update", "ws_test", "usr_author", {
+      issueId: "issue_b",
+      changes: { statusId: "state_triage" },
+    }) as MutationResult<Issue>;
+
+    expect(moved.data).toMatchObject({
+      statusId: "state_triage",
+      triageStatus: "pending",
+      snoozedUntil: null,
+    });
+  });
+
+  it("rejects a status from another team without partially updating the issue", () => {
+    expect(() =>
+      executeIssueAction("issue.update", "ws_test", "usr_author", {
+        issueId: "issue_b",
+        changes: { statusId: "state_other" },
+      }),
+    ).toThrow(DomainValidationError);
+
+    expect(
+      getDatabase()
+        .prepare("SELECT status_id, version FROM issues WHERE id = 'issue_b'")
+        .get(),
+    ).toEqual({ status_id: "state_backlog", version: 1 });
+  });
+
   it("moves an issue to another accessible team and preserves its old identifier alias", () => {
     const moved = executeIssueAction("issue.update", "ws_test", "usr_author", {
       issueId: "issue_a",
