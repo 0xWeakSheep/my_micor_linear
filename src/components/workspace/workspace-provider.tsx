@@ -37,6 +37,7 @@ interface MutationOptions {
 
 interface WorkspaceContextValue {
   data: BootstrapData;
+  updatingIssueIds: ReadonlySet<string>;
   preferences: WorkspacePreferences;
   selectedIssueId: string | null;
   selectedIssueIds: Set<string>;
@@ -72,6 +73,12 @@ export function WorkspaceProvider({
   children: ReactNode;
 }) {
   const [data, setData] = useState(initialData);
+  const dataRef = useRef(initialData);
+  const issueUpdateSequences = useRef(new Map<string, number>());
+  const issueUpdateQueues = useRef(new Map<string, Promise<unknown>>());
+  const [updatingIssueIds, setUpdatingIssueIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [preferences, setPreferenceState] = useState<WorkspacePreferences>(DEFAULT_PREFERENCES);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedIssueIds, setSelectedIssueIds] = useState<Set<string>>(() => new Set());
@@ -134,6 +141,7 @@ export function WorkspaceProvider({
       if (!response.ok) throw new Error("无法刷新工作区数据");
       const result = (await response.json()) as ActionResult<BootstrapData>;
       if (!result.ok || !result.data) throw new Error(result.error ?? "无法刷新工作区数据");
+      dataRef.current = result.data;
       startTransition(() => setData(result.data!));
     })().finally(() => {
       refreshInFlight.current = null;
@@ -213,7 +221,14 @@ export function WorkspaceProvider({
         });
         const result = (await response.json()) as ActionResult<T>;
         if (!response.ok || !result.ok) throw new Error(result.error ?? "操作失败");
-        if (options.refresh !== false) await refresh();
+        if (options.refresh !== false) {
+          try {
+            await refresh();
+          } catch {
+            toast.warning("操作已保存，但数据同步失败，将自动重试");
+            scheduleRefresh();
+          }
+        }
         if (options.successMessage) toast.success(options.successMessage);
         return result.data ?? null;
       } catch (error) {
@@ -223,39 +238,90 @@ export function WorkspaceProvider({
         return null;
       }
     },
-    [data.workspace.id, refresh],
+    [data.workspace.id, refresh, scheduleRefresh],
   );
 
   const updateIssue = useCallback(
     async (issueId: string, changes: Partial<Issue>) => {
-      const previous = data.issues.find((issue) => issue.id === issueId);
+      const previous = dataRef.current.issues.find((issue) => issue.id === issueId);
       if (!previous) return false;
 
-      setData((current) => ({
-        ...current,
-        issues: current.issues.map((issue) =>
-          issue.id === issueId
-            ? { ...issue, ...changes, updatedAt: new Date().toISOString() }
-            : issue,
-        ),
-      }));
+      const sequence = (issueUpdateSequences.current.get(issueId) ?? 0) + 1;
+      issueUpdateSequences.current.set(issueId, sequence);
+      const optimisticUpdatedAt = new Date().toISOString();
 
-      const result = await mutate<Issue>(
-        "issue.update",
-        { issueId, changes },
-        { quiet: true, refresh: true },
-      );
-      if (!result) {
-        setData((current) => ({
+      setData((current) => {
+        const next = {
           ...current,
-          issues: current.issues.map((issue) => (issue.id === issueId ? previous : issue)),
-        }));
-        toast.error("Issue 更新失败，已恢复原值");
+          issues: current.issues.map((issue) =>
+            issue.id === issueId
+              ? { ...issue, ...changes, updatedAt: optimisticUpdatedAt }
+              : issue,
+          ),
+        };
+        dataRef.current = next;
+        return next;
+      });
+      setUpdatingIssueIds((current) => new Set(current).add(issueId));
+
+      const previousRequest = issueUpdateQueues.current.get(issueId) ?? Promise.resolve();
+      const request = previousRequest
+        .catch(() => null)
+        .then(() =>
+          mutate<Issue>(
+            "issue.update",
+            { issueId, changes },
+            { quiet: true, refresh: false },
+          ),
+        );
+      issueUpdateQueues.current.set(issueId, request);
+      const result = await request;
+      const isLatest = issueUpdateSequences.current.get(issueId) === sequence;
+
+      if (!result) {
+        if (isLatest) {
+          setData((current) => {
+            const currentIssue = current.issues.find((issue) => issue.id === issueId);
+            if (currentIssue?.updatedAt !== optimisticUpdatedAt) return current;
+            const next = {
+              ...current,
+              issues: current.issues.map((issue) =>
+                issue.id === issueId ? previous : issue,
+              ),
+            };
+            dataRef.current = next;
+            return next;
+          });
+          toast.error("Issue 更新失败，已恢复原值");
+        }
+      } else if (isLatest) {
+        setData((current) => {
+          const next = {
+            ...current,
+            issues: current.issues.map((issue) =>
+              issue.id === issueId ? result : issue,
+            ),
+          };
+          dataRef.current = next;
+          return next;
+        });
+      }
+
+      if (isLatest) {
+        issueUpdateQueues.current.delete(issueId);
+        setUpdatingIssueIds((current) => {
+          const next = new Set(current);
+          next.delete(issueId);
+          return next;
+        });
+      }
+
+      if (!result) {
         return false;
       }
       return true;
     },
-    [data.issues, mutate],
+    [mutate],
   );
 
   const toggleIssueSelection = useCallback((issueId: string, additive = true) => {
@@ -270,6 +336,7 @@ export function WorkspaceProvider({
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       data,
+      updatingIssueIds,
       preferences,
       selectedIssueId,
       selectedIssueIds,
@@ -287,6 +354,7 @@ export function WorkspaceProvider({
     }),
     [
       data,
+      updatingIssueIds,
       preferences,
       selectedIssueId,
       selectedIssueIds,
