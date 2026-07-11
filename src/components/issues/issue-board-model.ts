@@ -32,8 +32,12 @@ export interface IssueBoardDropTarget {
   statusType?: WorkflowStateType | null;
 }
 
-function visibleStates(issues: Issue[], states: WorkflowState[]): WorkflowState[] {
-  const teamIds = new Set(issues.map((issue) => issue.teamId));
+function visibleStates(
+  issues: Issue[],
+  states: WorkflowState[],
+  scopeTeamIds?: string[],
+): WorkflowState[] {
+  const teamIds = new Set(scopeTeamIds ?? issues.map((issue) => issue.teamId));
 
   return states
     .filter((state) => teamIds.size === 0 || teamIds.has(state.teamId))
@@ -43,9 +47,10 @@ function visibleStates(issues: Issue[], states: WorkflowState[]): WorkflowState[
 export function buildIssueBoardColumns(
   issues: Issue[],
   states: WorkflowState[],
+  scopeTeamIds?: string[],
 ): IssueBoardColumn[] {
-  const teamIds = new Set(issues.map((issue) => issue.teamId));
-  const relevantStates = visibleStates(issues, states);
+  const teamIds = new Set(scopeTeamIds ?? issues.map((issue) => issue.teamId));
+  const relevantStates = visibleStates(issues, states, scopeTeamIds);
 
   if (teamIds.size <= 1) {
     return relevantStates.map((state) => ({

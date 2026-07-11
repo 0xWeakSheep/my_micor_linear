@@ -22,11 +22,12 @@ import { IssueList } from "./issue-list";
 
 interface IssuesViewProps {
   issues: Issue[];
+  scopeTeamIds?: string[];
   title?: string;
   description?: string;
 }
 
-export function IssuesView({ issues, title, description }: IssuesViewProps) {
+export function IssuesView({ issues, scopeTeamIds, title, description }: IssuesViewProps) {
   const {
     data,
     preferences,
@@ -85,7 +86,14 @@ export function IssuesView({ issues, title, description }: IssuesViewProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {preferences.layout === "list" ? <IssueList issues={result} /> : <IssueBoard issues={result} />}
+        {preferences.layout === "list" ? (
+          <IssueList issues={result} />
+        ) : (
+          <IssueBoard
+            issues={result}
+            scopeTeamIds={scopeTeamIds ?? [...new Set(issues.map((issue) => issue.teamId))]}
+          />
+        )}
       </div>
 
       {selectedIssueIds.size > 0 ? (

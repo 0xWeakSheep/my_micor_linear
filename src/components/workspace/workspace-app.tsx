@@ -313,7 +313,7 @@ function WorkspaceRoute({
     if (subpage === "cycles") return <PlanningView section="cycles" teamId={team.id} onNavigate={(target) => onNavigate(`${target.section}${target.details ? `/${target.details}` : ""}`)} />;
     if (subpage === "projects") {
       const projectIds = new Set(data.projects.filter((project) => project.teamIds.includes(team.id)).map((project) => project.id));
-      return <IssuesView issues={data.issues.filter((issue) => issue.teamId === team.id && issue.projectId && projectIds.has(issue.projectId))} title={`${team.name} · Projects`} />;
+      return <IssuesView issues={data.issues.filter((issue) => issue.teamId === team.id && issue.projectId && projectIds.has(issue.projectId))} scopeTeamIds={[team.id]} title={`${team.name} · Projects`} />;
     }
     const stateById = new Map(data.states.map((state) => [state.id, state]));
     const issues = data.issues.filter((issue) => {
@@ -328,7 +328,7 @@ function WorkspaceRoute({
       return true;
     });
     const pageLabel = subpage === "active" ? "Active" : subpage === "backlog" ? "Backlog" : subpage === "triage" ? "Triage" : "Issues";
-    return <IssuesView issues={issues} title={`${team.name} · ${pageLabel}`} description={team.description} />;
+    return <IssuesView issues={issues} scopeTeamIds={[team.id]} title={`${team.name} · ${pageLabel}`} description={team.description} />;
   }
 
   if (["projects", "cycles", "initiatives", "insights"].includes(section)) {

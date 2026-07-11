@@ -21,54 +21,22 @@ import type { Issue, WorkflowState, WorkflowStateType } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/workspace/workspace-provider";
 import { PriorityIcon, StateIcon, UserAvatar } from "./issue-glyphs";
+import { buildIssueBoardColumns } from "./issue-board-model";
 
-export function IssueBoard({ issues }: { issues: Issue[] }) {
+export function IssueBoard({
+  issues,
+  scopeTeamIds,
+}: {
+  issues: Issue[];
+  scopeTeamIds?: string[];
+}) {
   const { data, updateIssue, setSelectedIssueId, setCreateIssueOpen } = useWorkspace();
   const [activeIssueId, setActiveIssueId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const columns = useMemo(() => {
-    const teamIds = new Set(issues.map((issue) => issue.teamId));
-    const stateIdsWithIssues = new Set(issues.map((issue) => issue.statusId));
-    const relevantStates = data.states
-      .filter((state) => teamIds.size === 0 || teamIds.has(state.teamId))
-      .filter((state) => state.type !== "canceled" || stateIdsWithIssues.has(state.id))
-      .toSorted((left, right) => left.position - right.position);
-
-    if (teamIds.size === 1) {
-      return relevantStates.map((state) => ({
-        id: state.id,
-        label: state.name,
-        state,
-        stateIds: [state.id],
-        statusId: state.id,
-        statusType: null,
-      }));
-    }
-
-    const typeOrder: WorkflowStateType[] = ["triage", "backlog", "unstarted", "started", "completed", "canceled"];
-    const typeLabels: Record<WorkflowStateType, string> = {
-      triage: "Triage",
-      backlog: "Backlog",
-      unstarted: "Todo",
-      started: "In Progress",
-      completed: "Done",
-      canceled: "Canceled",
-    };
-
-    return typeOrder.flatMap((type) => {
-      const states = relevantStates.filter((state) => state.type === type);
-      if (states.length === 0) return [];
-      const names = new Set(states.map((state) => state.name));
-      return [{
-        id: `type:${type}`,
-        label: names.size === 1 ? states[0].name : typeLabels[type],
-        state: states[0],
-        stateIds: states.map((state) => state.id),
-        statusId: null,
-        statusType: type,
-      }];
-    });
-  }, [data.states, issues]);
+  const columns = useMemo(
+    () => buildIssueBoardColumns(issues, data.states, scopeTeamIds),
+    [data.states, issues, scopeTeamIds],
+  );
   const activeIssue = data.issues.find((issue) => issue.id === activeIssueId);
 
   function handleDragStart(event: DragStartEvent) {

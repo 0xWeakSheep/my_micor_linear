@@ -85,6 +85,16 @@ describe("issue board model", () => {
     });
   });
 
+  it("preserves a team workflow when the filtered result is empty", () => {
+    const columns = buildIssueBoardColumns([], states, ["design"]);
+
+    expect(columns.map((column) => column.id)).toEqual([
+      "design_todo",
+      "design_progress",
+      "design_done",
+    ]);
+  });
+
   it("groups multiple teams by workflow type without losing team-specific states", () => {
     const columns = buildIssueBoardColumns(
       [
