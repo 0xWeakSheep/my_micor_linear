@@ -1212,7 +1212,28 @@ async function deliverWebhookTarget(
       "Webhook signing secret is unavailable; rotate the webhook secret before delivery.",
     );
   }
-  const signingSecret = unsealWebhookSecret(webhook.signing_secret_encrypted);
+  let signingSecret: string;
+  try {
+    signingSecret = unsealWebhookSecret(webhook.signing_secret_encrypted);
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : "Webhook signing secret could not be decrypted.";
+    const nextAttemptAt = new Date(
+      options.now.getTime() + retryDelayMs(attempt, options.baseRetryMs, options.maxRetryMs),
+    ).toISOString();
+    const exhausted = attempt >= options.maxAttempts;
+    database
+      .prepare(
+        `UPDATE webhook_deliveries
+            SET response_status = 0, response_body = ?, next_attempt_at = ?
+          WHERE id = ?`,
+      )
+      .run(message.slice(0, 4_096), exhausted ? null : nextAttemptAt, delivery.id);
+    return exhausted
+      ? { status: "terminal", error: message }
+      : { status: "pending", nextAttemptAt, error: message };
+  }
   const signature = createHmac("sha256", signingSecret).update(body).digest("hex");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.requestTimeoutMs);

@@ -487,4 +487,68 @@ describe("outbox webhook delivery", () => {
       database.prepare("SELECT response_body AS body FROM webhook_deliveries").get(),
     ).toMatchObject({ body: expect.stringMatching(/^PERMANENT:/) });
   });
+
+  it("stops retrying when a webhook signing secret cannot be decrypted", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    database
+      .prepare(
+        `INSERT INTO webhooks(
+          id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+          events_json, is_active, created_by_id, created_at, updated_at
+        ) VALUES (
+          'webhook_broken', 'workspace_1', 'Broken hook', 'https://hooks.example.com/hook',
+          'key', 'invalid-ciphertext', '["issue.created"]', 1, 'user_1', ?, ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, created_at
+        ) VALUES (
+          'event_broken', 'workspace_1', 'issue.created', 'issue', 'issue_1', '{}',
+          '2026-07-11T00:00:00.000Z', 0, '2026-07-11T00:00:00.000Z'
+        )`,
+      )
+      .run();
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const resolveHost = async () => [{ address: "93.184.216.34", family: 4 }];
+
+    const first = await deliverOutboxWebhooks(database, {
+      now: new Date("2026-07-11T00:00:00.000Z"),
+      fetchImplementation,
+      resolveHost,
+      baseRetryMs: 1_000,
+      maxAttempts: 2,
+    });
+    expect(first).toMatchObject({ processedEvents: 0, retryScheduled: 1 });
+
+    const second = await deliverOutboxWebhooks(database, {
+      now: new Date("2026-07-11T00:00:01.000Z"),
+      fetchImplementation,
+      resolveHost,
+      baseRetryMs: 1_000,
+      maxAttempts: 2,
+    });
+    expect(second).toMatchObject({ processedEvents: 1, terminalFailures: 1 });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(
+      database
+        .prepare(
+          `SELECT attempt, response_status AS responseStatus,
+                  next_attempt_at AS nextAttemptAt
+             FROM webhook_deliveries ORDER BY attempt`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        attempt: 1,
+        responseStatus: 0,
+        nextAttemptAt: "2026-07-11T00:00:01.000Z",
+      },
+      { attempt: 2, responseStatus: 0, nextAttemptAt: null },
+    ]);
+  });
 });
