@@ -23,6 +23,9 @@ import { CsvFormatError, csvRecords, stringifyCsv } from "./format";
 
 export type DataFormat = "json" | "csv";
 
+const WORKSPACE_EXPORT_SCHEMA = "micro-linear.workspace.v1";
+const LEGACY_WORKSPACE_EXPORT_SCHEMA = "orbit.workspace.v1";
+
 export interface DataExportResult {
   format: DataFormat;
   filename: string;
@@ -183,7 +186,13 @@ function normalizeJsonImport(content: string): NormalizedImport {
     throw new DomainValidationError("JSON file is not valid JSON.");
   }
   const root = asRecord(parsed);
-  const data = "data" in root ? asRecord(root.data) : root;
+  if (
+    root.schema !== WORKSPACE_EXPORT_SCHEMA &&
+    root.schema !== LEGACY_WORKSPACE_EXPORT_SCHEMA
+  ) {
+    throw new DomainValidationError("Workspace JSON schema is missing or unsupported.");
+  }
+  const data = asRecord(root.data);
   const issues = arrayValue<ImportIssue>(data, "issues");
   if (issues.some((issue) => !issue || typeof issue.title !== "string" || typeof issue.teamId !== "string")) {
     throw new DomainValidationError("JSON issues must include title and teamId.");
@@ -352,7 +361,7 @@ function buildCsv(data: BootstrapData): string {
 
 function exportSnapshot(data: BootstrapData): Record<string, unknown> {
   return {
-    schema: "micro-linear.workspace.v1",
+    schema: WORKSPACE_EXPORT_SCHEMA,
     exportedAt: new Date().toISOString(),
     workspace: data.workspace,
     data: {

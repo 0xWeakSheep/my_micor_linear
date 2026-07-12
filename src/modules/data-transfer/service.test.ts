@@ -96,6 +96,7 @@ describe("workspace data transfer", () => {
         format: "json",
         filename: "private-team.json",
         content: JSON.stringify({
+          schema: "micro-linear.workspace.v1",
           data: {
             teams: [{ id: "source_team", name: "Private", key: "PRI" }],
             issues: [{ id: "source_issue", teamId: "source_team", title: "Injected" }],
@@ -137,6 +138,7 @@ describe("workspace data transfer", () => {
         format: "json",
         filename: "private-project.json",
         content: JSON.stringify({
+          schema: "micro-linear.workspace.v1",
           data: {
             teams: [{ id: "source_team", name: "Engineering", key: "ENG" }],
             projects: [
@@ -157,6 +159,34 @@ describe("workspace data transfer", () => {
         .prepare("SELECT team_id AS teamId FROM project_teams WHERE project_id = 'project_private'")
         .all(),
     ).toEqual([{ teamId: "team_private" }]);
+  });
+
+  it("accepts the legacy v1 workspace schema and rejects unknown versions", () => {
+    expect(
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: "legacy.json",
+        content: JSON.stringify({ schema: "orbit.workspace.v1", data: { issues: [] } }),
+      }),
+    ).toMatchObject({ format: "json", created: { issues: 0 }, skipped: 0 });
+
+    fixture();
+    expect(() =>
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: "future.json",
+        content: JSON.stringify({
+          schema: "micro-linear.workspace.v999",
+          data: { issues: [] },
+        }),
+      }),
+    ).toThrow("Workspace JSON schema is missing or unsupported.");
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM audit_logs").get()).toEqual({
+      count: 0,
+    });
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM outbox_events").get()).toEqual({
+      count: 0,
+    });
   });
 });
 
