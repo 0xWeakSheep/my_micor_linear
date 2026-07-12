@@ -32,7 +32,7 @@ import {
   normalizeEmail,
 } from "@/lib/security";
 import { sealWebhookSecret } from "@/lib/webhook-secret";
-import { WEBHOOK_EVENTS } from "@/lib/webhooks";
+import { isValidWebhookEndpoint, WEBHOOK_EVENTS } from "@/lib/webhooks";
 import {
   ConflictError,
   DomainValidationError,
@@ -330,14 +330,20 @@ const apiScopeSchema = z.enum([
 
 const webhookEventSchema = z.enum(WEBHOOK_EVENTS);
 
+const webhookUrlSchema = z
+  .string()
+  .trim()
+  .max(2_048)
+  .url()
+  .refine(
+    isValidWebhookEndpoint,
+    "Webhook URL must use HTTPS without credentials or a fragment.",
+  );
+
 const webhookChangesSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
-    url: z
-      .string()
-      .url()
-      .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "Webhook URL must use HTTP or HTTPS.")
-      .optional(),
+    url: webhookUrlSchema.optional(),
     events: z.array(webhookEventSchema).min(1).max(30).optional(),
     isActive: z.boolean().optional(),
     rotateSecret: z.boolean().optional(),
@@ -1297,7 +1303,7 @@ function executeWebhookAction(action: string, workspaceId: string, actorId: stri
   if (action === "webhook.create") {
     const parsed = webhookChangesSchema.extend({
       name: z.string().trim().min(1).max(120),
-      url: z.string().url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "Webhook URL must use HTTP or HTTPS."),
+      url: webhookUrlSchema,
       events: z.array(webhookEventSchema).min(1).max(30),
     }).safeParse(payload); if (!parsed.success) invalid(parsed);
     const id = createId("webhook"); const secret = `whsec_${generateOpaqueToken()}`; const now = new Date().toISOString();

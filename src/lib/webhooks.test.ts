@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { WEBHOOK_EVENTS } from "./webhooks";
+import { isValidWebhookEndpoint, WEBHOOK_EVENTS } from "./webhooks";
 
 describe("webhook event catalog", () => {
   it("keeps every supported mutation available to API settings", () => {
@@ -14,5 +14,13 @@ describe("webhook event catalog", () => {
       "project-update.created",
       "member.updated",
     ]);
+  });
+
+  it("accepts only bounded HTTPS endpoints without credentials or fragments", () => {
+    expect(isValidWebhookEndpoint("https://hooks.example.com/events?source=linear")).toBe(true);
+    expect(isValidWebhookEndpoint("http://hooks.example.com/events")).toBe(false);
+    expect(isValidWebhookEndpoint("https://user:secret@hooks.example.com/events")).toBe(false);
+    expect(isValidWebhookEndpoint("https://hooks.example.com/events#fragment")).toBe(false);
+    expect(isValidWebhookEndpoint(`https://hooks.example.com/${"a".repeat(2_100)}`)).toBe(false);
   });
 });

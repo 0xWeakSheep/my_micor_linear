@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { Clipboard, Download, KeyRound, Plus, Trash2, Upload, Webhook as WebhookIcon } from "lucide-react";
 import type { ApiKeySummary, Webhook } from "@/lib/domain";
-import { WEBHOOK_EVENTS } from "@/lib/webhooks";
+import { isValidWebhookEndpoint, WEBHOOK_EVENTS } from "@/lib/webhooks";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-provider";
@@ -29,6 +29,7 @@ export function ApiSettings() {
   const [events, setEvents] = useState<string[]>(["issue.created", "issue.updated"]);
   const [creatingWebhook, setCreatingWebhook] = useState(false);
   const [revealedWebhookSecret, setRevealedWebhookSecret] = useState<string | null>(null);
+  const webhookUrlIsValid = !webhookUrl.trim() || isValidWebhookEndpoint(webhookUrl.trim());
 
   async function createKey() {
     if (!keyName.trim()) return;
@@ -79,10 +80,10 @@ export function ApiSettings() {
 
       <SettingsSection title="Webhooks" description="向 HTTPS 端点发送所选工作区事件。">
         <FormBody>
-          <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={webhookName} onChange={(event) => setWebhookName(event.target.value)} placeholder="数据仓库" /></Field><Field label="端点 URL"><NativeInput type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/micro-linear" /></Field></div>
+          <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={webhookName} onChange={(event) => setWebhookName(event.target.value)} placeholder="数据仓库" /></Field><Field label="端点 URL"><NativeInput type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/micro-linear" aria-invalid={!webhookUrlIsValid} />{!webhookUrlIsValid ? <p className="mt-1 text-xs text-danger">请输入不含凭据和片段的 HTTPS 地址。</p> : null}</Field></div>
           <EventPicker events={events} onChange={setEvents} />
         </FormBody>
-        <FormFooter><Button variant="primary" size="sm" loading={creatingWebhook} disabled={!webhookName.trim() || !webhookUrl.trim() || !events.length} onClick={() => void createWebhook()}>创建 Webhook</Button></FormFooter>
+        <FormFooter><Button variant="primary" size="sm" loading={creatingWebhook} disabled={!webhookName.trim() || !webhookUrl.trim() || !webhookUrlIsValid || !events.length} onClick={() => void createWebhook()}>创建 Webhook</Button></FormFooter>
         {revealedWebhookSecret ? (
           <div className="border-t border-border bg-[var(--warning-soft)] px-4 py-3 sm:px-5">
             <p className="text-xs font-medium text-warning">签名密钥只显示一次，请立即复制并用于校验 X-Micro-Linear-Signature。</p>

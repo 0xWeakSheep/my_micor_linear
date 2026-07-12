@@ -37,7 +37,7 @@ beforeAll(() => {
     .prepare(
       `INSERT INTO workspace_members(id, workspace_id, user_id, role, status, joined_at)
        VALUES
-         ('wm_actor', 'ws_test', 'usr_actor', 'member', 'active', ?),
+         ('wm_actor', 'ws_test', 'usr_actor', 'admin', 'active', ?),
          ('wm_private', 'ws_test', 'usr_private', 'member', 'active', ?)`,
     )
     .run(CREATED_AT, CREATED_AT);
@@ -122,5 +122,26 @@ describe("project document visibility", () => {
     expect(
       getDatabase().prepare("SELECT COUNT(*) AS count FROM documents").get(),
     ).toEqual({ count: 1 });
+  });
+});
+
+describe("webhook endpoint validation", () => {
+  it("rejects endpoints that cannot be delivered safely", () => {
+    for (const url of [
+      "http://hooks.example.com/events",
+      "https://user:secret@hooks.example.com/events",
+      "https://hooks.example.com/events#fragment",
+    ]) {
+      expect(() =>
+        executeWorkspaceAction("webhook.create", "ws_test", "usr_actor", {
+          name: "Unsafe hook",
+          url,
+          events: ["issue.created"],
+        }),
+      ).toThrow();
+    }
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM webhooks").get()).toEqual({
+      count: 0,
+    });
   });
 });
