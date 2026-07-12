@@ -797,6 +797,10 @@ function handleCycleAction(action: string, workspaceId: string, actorId: string,
     const now = new Date().toISOString();
     const id = createId("cycle");
     const data = transaction((database) => {
+      const duplicateNumber = database
+        .prepare("SELECT 1 FROM cycles WHERE team_id = ? AND number = ?")
+        .get(parsed.data.teamId, parsed.data.number);
+      if (duplicateNumber) throw new ConflictError("Cycle number already exists for this team.");
       validateCycleSchedule(database, parsed.data.teamId, {
         startDate: parsed.data.startDate,
         endDate: parsed.data.endDate,

@@ -299,6 +299,16 @@ describe("cycle scheduling", () => {
     expect(() =>
       executePlanningAction("cycle.create", "ws_test", "usr_actor", {
         teamId: "team_main",
+        number: 1,
+        name: "Duplicate number",
+        startDate: "2026-08-15",
+        endDate: "2026-08-28",
+      }),
+    ).toThrow(ConflictError);
+
+    expect(() =>
+      executePlanningAction("cycle.create", "ws_test", "usr_actor", {
+        teamId: "team_main",
         number: 2,
         name: "Overlapping",
         startDate: "2026-07-14",
