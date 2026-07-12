@@ -3,6 +3,8 @@ import "server-only";
 import { z } from "zod";
 
 import {
+  getTeamPermissionContext,
+  hasTeamPermission,
   requireTeamPermission,
   requireWorkspacePermission,
 } from "@/lib/auth";
@@ -1086,9 +1088,30 @@ function executeLabelAction(action: string, workspaceId: string, actorId: string
   return { data, eventType: "label.updated", resourceId: current.id };
 }
 
-function ensureProjectForDocument(database: Database, workspaceId: string, projectId: string | null | undefined): void {
+function ensureProjectForDocument(
+  database: Database,
+  workspaceId: string,
+  actorId: string,
+  projectId: string | null | undefined,
+): void {
   if (!projectId) return;
-  if (!database.prepare("SELECT 1 FROM projects WHERE id = ? AND workspace_id = ? AND trashed_at IS NULL").get(projectId, workspaceId)) {
+  const project = database
+    .prepare(
+      "SELECT 1 FROM projects WHERE id = ? AND workspace_id = ? AND trashed_at IS NULL",
+    )
+    .get(projectId, workspaceId);
+  if (!project) {
+    throw new ResourceNotFoundError("Project not found.");
+  }
+  const teamIds = database
+    .prepare("SELECT team_id AS teamId FROM project_teams WHERE project_id = ?")
+    .all(projectId) as Array<{ teamId: string }>;
+  if (
+    teamIds.length > 0 &&
+    !teamIds.some(({ teamId }) =>
+      hasTeamPermission(getTeamPermissionContext(actorId, teamId), "read"),
+    )
+  ) {
     throw new ResourceNotFoundError("Project not found.");
   }
 }
@@ -1100,7 +1123,7 @@ function executeDocumentAction(action: string, workspaceId: string, actorId: str
     if (!parsed.success) invalid(parsed);
     const id = createId("doc"); const now = new Date().toISOString();
     const data = transaction((database) => {
-      ensureProjectForDocument(database, workspaceId, parsed.data.projectId);
+      ensureProjectForDocument(database, workspaceId, actorId, parsed.data.projectId);
       database.prepare(`INSERT INTO documents(id, workspace_id, project_id, title, content, creator_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, workspaceId, parsed.data.projectId ?? null, parsed.data.title, parsed.data.content ?? "", actorId, now, now);
       finishAdministrativeMutation(database, { workspaceId, actorId, entityType: "document", entityId: id, eventType: "document.created", action: "document.created", metadata: { projectId: parsed.data.projectId ?? null, title: parsed.data.title }, createdAt: now });
@@ -1112,6 +1135,7 @@ function executeDocumentAction(action: string, workspaceId: string, actorId: str
   if (!parsed.success) invalid(parsed);
   const current = getDocument(getDatabase(), workspaceId, parsed.data.documentId);
   const context = requireWorkspacePermission(actorId, workspaceId, "create_project");
+  ensureProjectForDocument(getDatabase(), workspaceId, actorId, current.project_id);
   const now = new Date().toISOString();
   if (action === "document.delete") {
     if (current.creator_id !== actorId && context.role !== "admin") {
@@ -1122,7 +1146,7 @@ function executeDocumentAction(action: string, workspaceId: string, actorId: str
   }
   const changes = parsed.data.changes ?? {};
   const data = transaction((database) => {
-    ensureProjectForDocument(database, workspaceId, changes.projectId);
+    ensureProjectForDocument(database, workspaceId, actorId, changes.projectId);
     applyScalarChanges(database, "documents", current.id, changes, { title: "title", content: "content", projectId: "project_id" }, now);
     finishAdministrativeMutation(database, { workspaceId, actorId, entityType: "document", entityId: current.id, eventType: "document.updated", action: "document.updated", metadata: { fields: Object.keys(changes) }, createdAt: now });
     return toDocument(getDocument(database, workspaceId, current.id));
