@@ -144,4 +144,36 @@ describe("webhook endpoint validation", () => {
       count: 0,
     });
   });
+
+  it("marks legacy hooks as needing a signing key until rotation", () => {
+    const database = getDatabase();
+    database
+      .prepare(
+        `INSERT INTO webhooks(
+          id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+          events_json, is_active, created_by_id, created_at, updated_at
+        ) VALUES (
+          'webhook_legacy', 'ws_test', 'Legacy', 'https://hooks.example.com/events',
+          'legacy-hash', NULL, '["issue.created"]', 1, 'usr_actor', ?, ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+
+    const before = executeWorkspaceAction("webhook.update", "ws_test", "usr_actor", {
+      webhookId: "webhook_legacy",
+      changes: { isActive: false },
+    });
+    expect(before?.data).toMatchObject({
+      webhook: { signingReady: false, isActive: false },
+    });
+
+    const rotated = executeWorkspaceAction("webhook.update", "ws_test", "usr_actor", {
+      webhookId: "webhook_legacy",
+      changes: { rotateSecret: true },
+    });
+    expect(rotated?.data).toMatchObject({
+      webhook: { signingReady: true, isActive: false },
+      secret: expect.stringMatching(/^whsec_/),
+    });
+  });
 });

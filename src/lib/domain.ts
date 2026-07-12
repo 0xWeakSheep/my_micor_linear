@@ -359,6 +359,7 @@ export interface Webhook {
   url: string;
   events: string[];
   isActive: boolean;
+  signingReady: boolean;
   createdAt: string;
 }
 

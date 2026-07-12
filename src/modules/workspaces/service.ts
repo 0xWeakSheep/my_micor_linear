@@ -159,6 +159,7 @@ interface WebhookRow {
   url: string;
   events_json: string;
   is_active: number;
+  signing_secret_encrypted: string | null;
   created_at: string;
 }
 
@@ -489,6 +490,7 @@ function toWebhook(row: WebhookRow): Webhook {
     url: row.url,
     events: parseJson<string[]>(row.events_json, []),
     isActive: Boolean(row.is_active),
+    signingReady: Boolean(row.signing_secret_encrypted),
     createdAt: row.created_at,
   };
 }

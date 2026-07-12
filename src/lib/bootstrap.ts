@@ -120,9 +120,10 @@ interface TemplateRow extends Omit<IssueTemplate, "defaults" | "subIssues"> {
   sub_issues_json: string;
 }
 
-interface WebhookRow extends Omit<Webhook, "events" | "isActive"> {
+interface WebhookRow extends Omit<Webhook, "events" | "isActive" | "signingReady"> {
   events_json: string;
   is_active: number;
+  signing_ready: number;
 }
 
 export class BootstrapNotFoundError extends Error {
@@ -845,7 +846,8 @@ export function getBootstrapData(userId: string, workspaceSlug: string): Bootstr
   const webhooks = isAdmin
     ? getAll<WebhookRow>(
         `SELECT id, workspace_id AS workspaceId, name, url, events_json,
-                is_active, created_at AS createdAt
+                is_active, signing_secret_encrypted IS NOT NULL AS signing_ready,
+                created_at AS createdAt
            FROM webhooks
           WHERE workspace_id = ?
           ORDER BY name COLLATE NOCASE`,
@@ -857,6 +859,7 @@ export function getBootstrapData(userId: string, workspaceSlug: string): Bootstr
         url: webhook.url,
         events: parseJson<string[]>(webhook.events_json, []),
         isActive: Boolean(webhook.is_active),
+        signingReady: Boolean(webhook.signing_ready),
         createdAt: webhook.createdAt,
       }))
     : [];
