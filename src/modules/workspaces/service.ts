@@ -32,6 +32,7 @@ import {
   normalizeEmail,
 } from "@/lib/security";
 import { sealWebhookSecret } from "@/lib/webhook-secret";
+import { WEBHOOK_EVENTS } from "@/lib/webhooks";
 import {
   ConflictError,
   DomainValidationError,
@@ -327,16 +328,7 @@ const apiScopeSchema = z.enum([
   "webhooks:manage",
 ]);
 
-const webhookEventSchema = z.enum([
-  "issue.created",
-  "issue.updated",
-  "issue.deleted",
-  "comment.created",
-  "project.created",
-  "project.updated",
-  "project-update.created",
-  "member.updated",
-]);
+const webhookEventSchema = z.enum(WEBHOOK_EVENTS);
 
 const webhookChangesSchema = z
   .object({

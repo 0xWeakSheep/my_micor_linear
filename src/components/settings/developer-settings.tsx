@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Clipboard, Download, KeyRound, Plus, Trash2, Upload, Webhook as WebhookIcon } from "lucide-react";
 import type { ApiKeySummary, Webhook } from "@/lib/domain";
+import { WEBHOOK_EVENTS } from "@/lib/webhooks";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-provider";
@@ -17,8 +18,6 @@ import {
   SettingsSection,
   dividerClassName,
 } from "./settings-ui";
-
-const webhookEvents = ["issue.created", "issue.updated", "issue.deleted", "comment.created", "project.updated"];
 
 export function ApiSettings() {
   const { data, mutate } = useWorkspace();
@@ -165,7 +164,7 @@ function WebhookRow({ webhook }: { webhook: Webhook }) {
 
 function EventPicker({ events, onChange }: { events: string[]; onChange: (events: string[]) => void }) {
   return (
-    <fieldset><legend className="text-[11px] font-medium text-secondary">订阅事件</legend><div className="mt-1.5 flex flex-wrap gap-2">{webhookEvents.map((eventName) => { const checked = events.includes(eventName); return <label key={eventName} className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-secondary hover:border-border-strong"><input type="checkbox" checked={checked} onChange={() => onChange(checked ? events.filter((value) => value !== eventName) : [...events, eventName])} className="size-3.5 accent-[var(--accent)]" />{eventName}</label>; })}</div></fieldset>
+    <fieldset><legend className="text-[11px] font-medium text-secondary">订阅事件</legend><div className="mt-1.5 flex flex-wrap gap-2">{WEBHOOK_EVENTS.map((eventName) => { const checked = events.includes(eventName); return <label key={eventName} className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-secondary hover:border-border-strong"><input type="checkbox" checked={checked} onChange={() => onChange(checked ? events.filter((value) => value !== eventName) : [...events, eventName])} className="size-3.5 accent-[var(--accent)]" />{eventName}</label>; })}</div></fieldset>
   );
 }
 

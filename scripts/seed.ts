@@ -694,7 +694,7 @@ async function seed(): Promise<void> {
       { id: "apikey_demo", workspace_id: WORKSPACE_ID, user_id: "usr_demo", name: "Local automation", prefix: "ml_demo", token_hash: hashOpaqueToken("ml_demo_seed_token"), scopes_json: JSON.stringify(["issues:read", "issues:write", "projects:read"]), last_used_at: "2026-07-10T08:00:00.000Z", expires_at: null, created_at: CREATED },
     ]);
     insertRows(database, "webhooks", [
-      { id: "webhook_local", workspace_id: WORKSPACE_ID, name: "Local release bot", url: "http://localhost:4000/hooks/micro-linear", secret_hash: hashOpaqueToken("micro-linear-seed-webhook-secret"), signing_secret_encrypted: sealWebhookSecret("micro-linear-seed-webhook-secret"), events_json: JSON.stringify(["issue.created", "issue.updated", "project.update.created"]), is_active: 1, created_by_id: "usr_demo", created_at: CREATED, updated_at: NOW },
+      { id: "webhook_local", workspace_id: WORKSPACE_ID, name: "Local release bot", url: "http://localhost:4000/hooks/micro-linear", secret_hash: hashOpaqueToken("micro-linear-seed-webhook-secret"), signing_secret_encrypted: sealWebhookSecret("micro-linear-seed-webhook-secret"), events_json: JSON.stringify(["issue.created", "issue.updated", "project-update.created"]), is_active: 1, created_by_id: "usr_demo", created_at: CREATED, updated_at: NOW },
     ]);
     insertRows(database, "webhook_deliveries", [
       { id: "delivery_seed", webhook_id: "webhook_local", event_id: "event_seed_issue", request_body: JSON.stringify({ type: "issue.updated", data: { id: "issue_eng_102" } }), response_status: 200, response_body: "ok", attempt: 1, next_attempt_at: null, delivered_at: "2026-07-11T05:46:00.000Z", created_at: "2026-07-11T05:45:30.000Z" },
