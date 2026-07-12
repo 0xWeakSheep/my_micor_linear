@@ -417,7 +417,15 @@ describe("issue comments", () => {
 describe("issue archive and trash", () => {
   it("restores an issue to the active workspace from either archive or trash", () => {
     executeIssueAction("issue.archive", "ws_test", "usr_author", { issueId: "issue_a" });
-    executeIssueAction("issue.delete", "ws_test", "usr_author", { issueId: "issue_a" });
+    const deleted = executeIssueAction("issue.delete", "ws_test", "usr_author", {
+      issueId: "issue_a",
+    });
+    expect(deleted?.eventType).toBe("issue.deleted");
+    expect(
+      getDatabase()
+        .prepare("SELECT type FROM outbox_events WHERE aggregate_id = 'issue_a' ORDER BY created_at, rowid")
+        .all(),
+    ).toEqual([{ type: "issue.archive" }, { type: "issue.deleted" }]);
     const removed = getDatabase()
       .prepare("SELECT archived_at, trashed_at FROM issues WHERE id = 'issue_a'")
       .get() as { archived_at: string | null; trashed_at: string | null };

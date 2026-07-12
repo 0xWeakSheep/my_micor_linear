@@ -1434,6 +1434,7 @@ export function executeIssueAction(
     if (current.workspace_id !== workspaceId) throw new ResourceNotFoundError();
     requireTeamPermission(actorId, current.team_id, "edit_issue");
     const now = new Date().toISOString();
+    const eventType = action === "issue.delete" ? "issue.deleted" : action;
     const data = transaction((database) => {
       if (action === "issue.restore") {
         database.prepare("UPDATE issues SET archived_at = NULL, trashed_at = NULL, updated_at = ?, version = version + 1 WHERE id = ?").run(now, current.id);
@@ -1441,10 +1442,10 @@ export function executeIssueAction(
         const column = action === "issue.archive" ? "archived_at" : "trashed_at";
         database.prepare(`UPDATE issues SET ${column} = ?, updated_at = ?, version = version + 1 WHERE id = ?`).run(now, now, current.id);
       }
-      finishMutation(database, { workspaceId, actorId, entityType: "issue", entityId: current.id, eventType: action.replace(".", "."), action: action.split(".")[1], createdAt: now });
+      finishMutation(database, { workspaceId, actorId, entityType: "issue", entityId: current.id, eventType, action: action.split(".")[1], createdAt: now });
       return getIssue(database, current.id);
     });
-    return { data, eventType: action, resourceId: current.id };
+    return { data, eventType, resourceId: current.id };
   }
 
   if (action === "issue.subscribe") {
