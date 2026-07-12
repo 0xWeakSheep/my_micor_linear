@@ -82,6 +82,55 @@ describe("workspace data transfer", () => {
     expect((db.prepare("SELECT COUNT(*) AS count FROM outbox_events WHERE type = 'data.imported'").get() as { count: number }).count).toBe(1);
   });
 
+  it("uses source identifiers to make repeated imports idempotent", () => {
+    const payload = {
+      format: "json" as const,
+      filename: "retryable.json",
+      content: JSON.stringify({
+        schema: "micro-linear.workspace.v1",
+        data: {
+          teams: [{ id: "source_team", name: "Imported", key: "FOO" }],
+          issues: [
+            {
+              id: "source_issue",
+              teamId: "source_team",
+              identifier: "FOO-10",
+              title: "Retry-safe issue",
+            },
+          ],
+        },
+      }),
+    };
+
+    expect(importWorkspaceData("ws_test", "usr_admin", payload)).toMatchObject({
+      created: { issues: 1 },
+      skipped: 0,
+    });
+    expect(importWorkspaceData("ws_test", "usr_admin", payload)).toMatchObject({
+      created: { issues: 0 },
+      skipped: 1,
+    });
+
+    const database = getDatabase();
+    expect(
+      database.prepare("SELECT identifier FROM issues WHERE title = 'Retry-safe issue'").all(),
+    ).toEqual([{ identifier: "FOO-1" }]);
+    expect(
+      database
+        .prepare(
+          `SELECT alias.identifier, alias.is_current AS isCurrent
+             FROM issue_identifier_aliases alias
+             JOIN issues issue ON issue.id = alias.issue_id
+            WHERE issue.title = 'Retry-safe issue'
+            ORDER BY alias.identifier`,
+        )
+        .all(),
+    ).toEqual([
+      { identifier: "FOO-1", isCurrent: 1 },
+      { identifier: "FOO-10", isCurrent: 0 },
+    ]);
+  });
+
   it("rejects malformed imports and guest exports", () => {
     expect(() => importWorkspaceData("ws_test", "usr_admin", { format: "csv", filename: "bad.csv", content: "Name\nMissing fields" })).toThrow("requires Title and Team");
     expect(() => exportWorkspaceData("ws_test", "usr_guest", { format: "json", scope: "workspace" })).toThrow();

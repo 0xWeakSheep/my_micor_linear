@@ -568,7 +568,18 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
     const newlyCreated = new Set<string>();
     for (const source of normalized.issues) {
       if (source.identifier) {
-        const existing = database.prepare("SELECT id, team_id AS teamId FROM issues WHERE workspace_id = ? AND identifier = ? COLLATE NOCASE").get(workspaceId, source.identifier) as { id: string; teamId: string } | undefined;
+        const existing = database
+          .prepare(
+            `SELECT DISTINCT issue.id, issue.team_id AS teamId
+               FROM issues issue
+               LEFT JOIN issue_identifier_aliases alias ON alias.issue_id = issue.id
+              WHERE issue.workspace_id = ?
+                AND (issue.identifier = ? COLLATE NOCASE OR alias.identifier = ? COLLATE NOCASE)
+              LIMIT 1`,
+          )
+          .get(workspaceId, source.identifier, source.identifier) as
+          | { id: string; teamId: string }
+          | undefined;
         if (existing) {
           requireImportTeamAccess(actorId, existing.teamId);
           issueMap.set(source.id, existing.id); skipped += 1; continue;
@@ -592,6 +603,15 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
       database.prepare(`INSERT INTO issues(id, workspace_id, team_id, identifier, number, title, description, status_id, priority, assignee_id, creator_id, project_id, cycle_id, estimate, due_date, sort_order, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
         .run(id, workspaceId, teamId, identifier, sequence.number, source.title.slice(0, 500), source.description ?? "", statusId, source.priority ?? 0, assigneeId, actorId, projectId, source.cycleId ? cycleMap.get(source.cycleId) ?? null : null, source.estimate ?? null, source.dueDate ?? null, source.sortOrder ?? Date.now(), createdAt, updatedAt);
       database.prepare("INSERT INTO issue_identifier_aliases(id, workspace_id, issue_id, identifier, is_current, created_at) VALUES (?, ?, ?, ?, 1, ?)").run(createId("alias"), workspaceId, id, identifier, now);
+      if (source.identifier && source.identifier.toLowerCase() !== identifier.toLowerCase()) {
+        database
+          .prepare(
+            `INSERT INTO issue_identifier_aliases(
+              id, workspace_id, issue_id, identifier, is_current, created_at
+            ) VALUES (?, ?, ?, ?, 0, ?)`,
+          )
+          .run(createId("alias"), workspaceId, id, source.identifier, now);
+      }
       for (const labelId of source.labelIds ?? []) { const mapped = labelMap.get(labelId); if (mapped) database.prepare("INSERT OR IGNORE INTO issue_labels(issue_id, label_id) VALUES (?, ?)").run(id, mapped); }
       for (const labelName of source.labelNames ?? []) { const mapped = [...normalized.labels].find((label) => label.name.toLowerCase() === labelName.toLowerCase()); const local = mapped ? labelMap.get(mapped.id) : undefined; if (local) database.prepare("INSERT OR IGNORE INTO issue_labels(issue_id, label_id) VALUES (?, ?)").run(id, local); }
       issueMap.set(source.id, id); newlyCreated.add(source.id); created.issues += 1;
