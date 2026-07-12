@@ -25,6 +25,7 @@ import { hashOpaqueToken } from "@/lib/security";
 
 const TEST_TOKEN = "ml_test_workspace_a";
 const READ_ONLY_TOKEN = "ml_test_read_only";
+const WRITE_ONLY_TOKEN = "ml_test_write_only";
 const EXPIRED_TOKEN = "ml_test_expired";
 const CREATED_AT = "2026-07-01T00:00:00.000Z";
 
@@ -241,6 +242,14 @@ function insertFixture(): void {
     CREATED_AT,
   );
   insertApiKey.run(
+    "key_write_only",
+    "Write-only token",
+    hashOpaqueToken(WRITE_ONLY_TOKEN),
+    JSON.stringify(["issues:write"]),
+    null,
+    CREATED_AT,
+  );
+  insertApiKey.run(
     "key_expired",
     "Expired token",
     hashOpaqueToken(EXPIRED_TOKEN),
@@ -449,6 +458,40 @@ describe("REST API v1 issue mutations", () => {
     expect((await readOnly.json()) as object).toMatchObject({
       error: { code: "insufficient_scope" },
     });
+
+    const writeOnly = await updateIssue(
+      request("/api/v1/issues/issue_a_public", WRITE_ONLY_TOKEN, {
+        method: "PATCH",
+        body: JSON.stringify({ title: "No read scope" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      { params: Promise.resolve({ issueId: "issue_a_public" }) },
+    );
+    expect(writeOnly.status).toBe(403);
+    expect((await writeOnly.json()) as object).toMatchObject({
+      error: { code: "insufficient_scope" },
+    });
+
+    const beforeEmptyUpdate = getOne<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM outbox_events WHERE aggregate_id = 'issue_a_public'",
+    )?.count;
+    const emptyUpdate = await updateIssue(
+      request("/api/v1/issues/issue_a_public", TEST_TOKEN, {
+        method: "PATCH",
+        body: JSON.stringify({}),
+        headers: { "Content-Type": "application/json" },
+      }),
+      { params: Promise.resolve({ issueId: "issue_a_public" }) },
+    );
+    expect(emptyUpdate.status).toBe(400);
+    expect((await emptyUpdate.json()) as object).toMatchObject({
+      error: { code: "validation_error" },
+    });
+    expect(
+      getOne<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM outbox_events WHERE aggregate_id = 'issue_a_public'",
+      )?.count,
+    ).toBe(beforeEmptyUpdate);
 
     const invalidJson = await createIssue(
       request("/api/v1/issues", TEST_TOKEN, {

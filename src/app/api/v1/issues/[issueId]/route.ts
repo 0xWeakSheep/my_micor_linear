@@ -37,7 +37,7 @@ export async function PATCH(
   request: NextRequest,
   routeContext: IssueRouteContext,
 ): Promise<Response> {
-  return withApiV1(request, "issues:write", async (context) => {
+  return withApiV1(request, ["issues:read", "issues:write"], async (context) => {
     const { issueId } = await routeContext.params;
     const issue = getApiV1WorkspaceData(context).issues.find(
       (candidate) =>

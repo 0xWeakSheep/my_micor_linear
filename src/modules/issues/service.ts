@@ -1418,6 +1418,9 @@ export function executeIssueAction(
   if (action === "issue.update") {
     const parsed = z.object({ issueId: z.string().min(1), changes: issueChangesSchema }).strict().safeParse(payload);
     if (!parsed.success) throw new DomainValidationError("Invalid issue update.");
+    if (Object.keys(parsed.data.changes).length === 0) {
+      throw new DomainValidationError("At least one issue change is required.");
+    }
     const current = getIssueRow(getDatabase(), parsed.data.issueId);
     if (current.workspace_id !== workspaceId) throw new ResourceNotFoundError();
     requireTeamPermission(actorId, current.team_id, "edit_issue");
@@ -1432,6 +1435,9 @@ export function executeIssueAction(
   if (action === "issue.bulkUpdate") {
     const parsed = z.object({ issueIds: z.array(z.string().min(1)).min(1).max(500), changes: issueChangesSchema }).strict().safeParse(payload);
     if (!parsed.success) throw new DomainValidationError("Invalid bulk issue update.");
+    if (Object.keys(parsed.data.changes).length === 0) {
+      throw new DomainValidationError("At least one issue change is required.");
+    }
     const ids = [...new Set(parsed.data.issueIds)];
     for (const issueId of ids) {
       const current = getIssueRow(getDatabase(), issueId);
