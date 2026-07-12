@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { Clipboard, Download, KeyRound, Plus, Trash2, Upload, Webhook as WebhookIcon } from "lucide-react";
-import type { ApiKeySummary, Webhook } from "@/lib/domain";
+import { toast } from "sonner";
+import type { ActionResult, ApiKeySummary, Webhook } from "@/lib/domain";
 import { isValidWebhookEndpoint, WEBHOOK_EVENTS } from "@/lib/webhooks";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
@@ -171,10 +172,16 @@ function EventPicker({ events, onChange }: { events: string[]; onChange: (events
 }
 
 type DataFormat = "json" | "csv";
-interface ExportResult { content?: string; data?: string; filename?: string; mime?: string }
+interface ImportResult {
+  created: Record<string, number>;
+  skipped: number;
+  warnings: string[];
+}
+
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 
 export function ImportExportSettings() {
-  const { data, mutate } = useWorkspace();
+  const { data, refresh } = useWorkspace();
   const fileRef = useRef<HTMLInputElement>(null);
   const [format, setFormat] = useState<DataFormat>("json");
   const [file, setFile] = useState<File | null>(null);
@@ -183,34 +190,75 @@ export function ImportExportSettings() {
 
   async function importData() {
     if (!file) return;
+    if (file.size > MAX_IMPORT_BYTES) {
+      toast.error("导入文件不能超过 20 MB");
+      return;
+    }
     setImporting(true);
-    const content = await file.text();
-    const detectedFormat: DataFormat = file.name.toLocaleLowerCase().endsWith(".csv") ? "csv" : "json";
-    const result = await mutate("data.import", { format: detectedFormat, filename: file.name, content }, { successMessage: "数据导入完成" });
-    setImporting(false);
-    if (result) {
+    try {
+      const detectedFormat: DataFormat = file.name.toLocaleLowerCase().endsWith(".csv") ? "csv" : "json";
+      const form = new FormData();
+      form.set("file", file);
+      form.set("format", detectedFormat);
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(data.workspace.slug)}/import`,
+        { method: "POST", body: form },
+      );
+      const result = (await response.json()) as ActionResult<ImportResult>;
+      if (!response.ok || !result.ok || !result.data) {
+        throw new Error(result.error ?? "数据导入失败");
+      }
+      const created = Object.values(result.data.created).reduce((sum, count) => sum + count, 0);
+      toast.success(`导入完成：新增 ${created} 项`);
+      if (result.data.skipped > 0 || result.data.warnings.length > 0) {
+        toast.warning(
+          `另有 ${result.data.skipped} 项跳过、${result.data.warnings.length} 条警告`,
+        );
+      }
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
+      try {
+        await refresh();
+      } catch {
+        toast.warning("导入已保存，但页面刷新失败，请稍后重试");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "数据导入失败");
+    } finally {
+      setImporting(false);
     }
   }
 
   async function exportData() {
     setExporting(true);
-    const result = await mutate<ExportResult>("data.export", { format, scope: "workspace" }, { refresh: false, successMessage: "导出文件已生成" });
-    setExporting(false);
-    const content = result?.content ?? result?.data;
-    if (!content) return;
-    const blob = new Blob([content], { type: result?.mime ?? (format === "json" ? "application/json" : "text/csv") });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = result?.filename ?? `${data.workspace.slug}-export.${format}`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(data.workspace.slug)}/export?format=${format}`,
+      );
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as ActionResult | null;
+        throw new Error(result?.error ?? "数据导出失败");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename = /filename="([^"]+)"/i.exec(disposition)?.[1]
+        ?? `${data.workspace.slug}-export.${format}`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("导出文件已生成");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "数据导出失败");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
-    <SettingsPage title="导入与导出" description="迁移 Issue 数据，或为备份和分析导出整个工作区。">
+    <SettingsPage title="导入与导出" description="迁移 Issue 数据，或为分析导出工作区快照。">
       <SettingsSection title="导入数据" description="支持本应用导出的 JSON，或包含 Issue 字段的 CSV。">
         <FormBody>
           <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border-strong bg-surface-subtle px-4 text-center transition-colors hover:bg-surface-hover focus-within:ring-2 focus-within:ring-accent">
@@ -224,7 +272,7 @@ export function ImportExportSettings() {
       </SettingsSection>
       <SettingsSection title="导出工作区" description={`包括 ${data.issues.length} 个 Issue、${data.projects.length} 个项目及相关配置。`}>
         <FormBody className="grid gap-3 sm:grid-cols-[180px_1fr] sm:items-end sm:space-y-0">
-          <Field label="文件格式"><NativeSelect value={format} onChange={(event) => setFormat(event.target.value as DataFormat)}><option value="json">JSON（完整备份）</option><option value="csv">CSV（Issue 列表）</option></NativeSelect></Field>
+          <Field label="文件格式"><NativeSelect value={format} onChange={(event) => setFormat(event.target.value as DataFormat)}><option value="json">JSON（工作区快照）</option><option value="csv">CSV（Issue 列表）</option></NativeSelect></Field>
           <p className="text-xs leading-5 text-tertiary">导出不会包含 API Key 明文、登录凭证或已删除的数据。</p>
         </FormBody>
         <FormFooter><Button variant="primary" size="sm" loading={exporting} startIcon={<Download size={14} />} onClick={() => void exportData()}>导出数据</Button></FormFooter>
