@@ -24,6 +24,32 @@ const envelopeSchema = z
   })
   .strict();
 
+export function actionErrorDetails(error: unknown): { status: number; message: string } {
+  const status =
+    error instanceof AuthenticationError
+      ? 401
+      : error instanceof PermissionError
+        ? 403
+        : error instanceof ResourceNotFoundError
+          ? 404
+          : error instanceof ConflictError
+            ? 409
+            : error instanceof DomainValidationError
+              ? error.status
+              : error instanceof SyntaxError
+                ? 400
+                : 500;
+  return {
+    status,
+    message:
+      status >= 500
+        ? "Action failed."
+        : error instanceof Error
+          ? error.message
+          : "Action failed.",
+  };
+}
+
 export async function POST(request: NextRequest) {
   const observation = observeRequest(request, "actions.execute");
   let action: string | undefined;
@@ -65,22 +91,10 @@ export async function POST(request: NextRequest) {
     observation.complete(200, { action, workspaceId, actorId });
     return observation.withResponseHeaders(response);
   } catch (error) {
-    const status =
-      error instanceof AuthenticationError
-        ? 401
-        : error instanceof PermissionError
-          ? 403
-          : error instanceof ResourceNotFoundError
-            ? 404
-            : error instanceof ConflictError
-              ? 409
-              : error instanceof DomainValidationError
-                ? error.status
-                : error instanceof SyntaxError
-                  ? 400
-                  : 500;
+    const { status, message } = actionErrorDetails(error);
+    if (status >= 500) console.error("Action request failed", error);
     const response = NextResponse.json<ActionResult>(
-      { ok: false, error: error instanceof Error ? error.message : "Action failed." },
+      { ok: false, error: message },
       { status, headers: { "Cache-Control": "no-store" } },
     );
     observation.complete(

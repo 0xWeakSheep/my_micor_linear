@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { POST } from "./route";
+import { actionErrorDetails, POST } from "./route";
 
 describe("action request observability", () => {
   it("adds request correlation to an early cross-site rejection", async () => {
@@ -24,5 +24,13 @@ describe("action request observability", () => {
     expect(response.headers.get("x-request-id")).toBe("reverse-proxy-123");
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({ ok: false });
+  });
+
+  it("does not expose internal database errors to callers", () => {
+    expect(
+      actionErrorDetails(
+        new Error("UNIQUE constraint failed: cycles.team_id, cycles.number"),
+      ),
+    ).toEqual({ status: 500, message: "Action failed." });
   });
 });
