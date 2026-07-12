@@ -1,4 +1,6 @@
-# Micro Linear
+# my_micor_linear
+
+产品名称：Micro Linear
 
 Micro Linear 是一个面向 100 人以内团队的 Linear 风格产品协作系统。它覆盖 Issue、团队工作流、Triage、Cycle、Project、Initiative、View、Inbox、搜索、通知、报表和管理设置，不包含任何 AI 功能。
 
