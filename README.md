@@ -140,14 +140,16 @@ npm run db:restore-verify -- --backup .data/backups/micro-linear-backup-20260711
 
 ## 后台任务
 
-重复 Issue、Cycle 到期/提醒和 Outbox Webhook 由一次性执行器处理：
+重复 Issue、Cycle 到期/提醒和 Outbox Webhook 默认由 Web 进程内的单实例调度器处理，启动后会立即运行，之后默认每 5 秒执行一次。可通过 `MICRO_LINEAR_BACKGROUND_JOBS_INTERVAL_MS` 调整为 1–300 秒。
+
+以下一次性执行器仍可用于手工排障：
 
 ```bash
 npm run jobs:run
 npm run jobs:run -- --help
 ```
 
-生产环境建议每分钟调用一次，并用系统锁避免同一实例重叠执行。例如 Linux cron：
+如果希望改用系统 cron，先设置 `MICRO_LINEAR_BACKGROUND_JOBS_DISABLED=1`，再用系统锁避免同一实例重叠执行。例如 Linux cron：
 
 ```cron
 * * * * * cd /srv/micro-linear && flock -n /tmp/micro-linear-jobs.lock npm run jobs:run >> /var/log/micro-linear-jobs.log 2>&1
