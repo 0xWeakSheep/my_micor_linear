@@ -14,6 +14,7 @@ import {
   ConflictError,
   DomainValidationError,
   type MutationResult,
+  ResourceNotFoundError,
 } from "@/modules/shared/mutation";
 import { executeIssueAction } from "./service";
 
@@ -550,6 +551,47 @@ describe("issue planning properties", () => {
         changes: { projectId: "project_b", milestoneId: "milestone_a" },
       }),
     ).toThrow(DomainValidationError);
+  });
+
+  it("does not link issues to a project from an inaccessible private team", () => {
+    const now = "2026-07-11T00:00:00.000Z";
+    const database = getDatabase();
+    database.exec(`
+      INSERT INTO projects(
+        id, workspace_id, team_id, name, slug, status, color, icon,
+        created_at, updated_at
+      ) VALUES (
+        'project_private', 'ws_test', 'team_private', 'Private project',
+        'private-project', 'planned', '#555', 'P', '${now}', '${now}'
+      );
+      INSERT INTO project_teams(project_id, team_id)
+      VALUES ('project_private', 'team_private');
+    `);
+
+    expect(() =>
+      executeIssueAction("issue.update", "ws_test", "usr_author", {
+        issueId: "issue_a",
+        changes: { projectId: "project_private" },
+      }),
+    ).toThrow(ResourceNotFoundError);
+    expect(() =>
+      executeIssueAction("issue.create", "ws_test", "usr_author", {
+        teamId: "team_main",
+        title: "Private project injection",
+        projectId: "project_private",
+      }),
+    ).toThrow(ResourceNotFoundError);
+
+    expect(database.prepare("SELECT project_id FROM issues WHERE id = 'issue_a'").get()).toEqual({
+      project_id: null,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM issues").get()).toEqual({ count: 4 });
+    expect(
+      database.prepare("SELECT next_issue_number FROM teams WHERE id = 'team_main'").get(),
+    ).toEqual({ next_issue_number: 4 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM outbox_events").get()).toEqual({
+      count: 0,
+    });
   });
 });
 

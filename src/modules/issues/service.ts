@@ -331,6 +331,7 @@ function findRelationBySelector(
 function validateIssueReferences(
   database: Database,
   workspaceId: string,
+  actorId: string,
   teamId: string,
   input: z.infer<typeof issueChangesSchema>,
   issueId?: string,
@@ -354,7 +355,18 @@ function validateIssueReferences(
     const project = database
       .prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ? AND trashed_at IS NULL")
       .get(input.projectId, workspaceId);
-    if (!project) throw new DomainValidationError("Project is not available in this workspace.");
+    if (!project) throw new ResourceNotFoundError("Project not found.");
+    const projectTeams = database
+      .prepare("SELECT team_id AS teamId FROM project_teams WHERE project_id = ?")
+      .all(input.projectId) as Array<{ teamId: string }>;
+    if (
+      projectTeams.length > 0 &&
+      !projectTeams.some(({ teamId: projectTeamId }) =>
+        hasTeamPermission(getTeamPermissionContext(actorId, projectTeamId), "read"),
+      )
+    ) {
+      throw new ResourceNotFoundError("Project not found.");
+    }
   }
   if (input.milestoneId) {
     const effectiveProjectId =
@@ -518,7 +530,14 @@ function applyIssueChanges(
   if (movingTeams && !normalizedChanges.statusId) {
     throw new DomainValidationError("Target team does not have a workflow state.");
   }
-  validateIssueReferences(database, issue.workspace_id, targetTeamId, normalizedChanges, issue.id);
+  validateIssueReferences(
+    database,
+    issue.workspace_id,
+    actorId,
+    targetTeamId,
+    normalizedChanges,
+    issue.id,
+  );
   const sets: string[] = [];
   const values: BindValue[] = [];
   const scalarMapping = {
@@ -742,7 +761,7 @@ function insertCreatedIssue(database: Database, input: InsertIssueInput): Issue 
     snoozedUntil: input.snoozedUntil,
     labelIds: input.labelIds,
   };
-  validateIssueReferences(database, input.workspaceId, input.teamId, references);
+  validateIssueReferences(database, input.workspaceId, input.actorId, input.teamId, references);
 
   const issueId = createId("issue");
   const identifier = `${team.key.toUpperCase()}-${team.issue_number}`;
