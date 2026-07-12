@@ -3,6 +3,7 @@ export {
   ApiV1Error,
   apiV1Data,
   apiV1List,
+  readApiV1Json,
   withApiV1,
   type ApiV1Context,
   type ApiV1DataBody,

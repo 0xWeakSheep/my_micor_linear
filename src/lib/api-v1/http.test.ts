@@ -17,7 +17,7 @@ import {
 import { GET as getMembers } from "@/app/api/v1/members/route";
 import { GET as getProjects } from "@/app/api/v1/projects/route";
 import { GET as getTeams } from "@/app/api/v1/teams/route";
-import { apiV1Data, withApiV1 } from "@/lib/api-v1";
+import { apiV1Data, readApiV1Json, withApiV1 } from "@/lib/api-v1";
 import { closeDatabase, getDatabase, getOne } from "@/lib/db";
 import type { Issue, Membership, Project, Team } from "@/lib/domain";
 import { subscribeToWorkspace, type WorkspaceEvent } from "@/lib/events";
@@ -319,6 +319,35 @@ describe("REST API v1 authentication", () => {
         "SELECT last_used_at FROM api_keys WHERE id = 'key_read_only'",
       )?.last_used_at,
     ).not.toBeNull();
+  });
+});
+
+describe("REST API v1 JSON requests", () => {
+  it("requires a JSON media type", async () => {
+    const response = await createIssue(
+      request("/api/v1/issues", TEST_TOKEN, {
+        method: "POST",
+        body: JSON.stringify({ teamId: "team_a_public", title: "Wrong media type" }),
+        headers: { "Content-Type": "text/plain" },
+      }),
+    );
+    expect(response.status).toBe(415);
+    expect((await response.json()) as object).toMatchObject({
+      error: { code: "unsupported_media_type" },
+    });
+  });
+
+  it("bounds streamed JSON bodies without relying on Content-Length", async () => {
+    await expect(
+      readApiV1Json(
+        new Request("http://micro-linear.test/api/v1/issues", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: "too large" }),
+        }),
+        { maxBytes: 8 },
+      ),
+    ).rejects.toMatchObject({ status: 413, code: "payload_too_large" });
   });
 });
 

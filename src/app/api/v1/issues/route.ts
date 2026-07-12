@@ -1,6 +1,12 @@
 import type { NextRequest } from "next/server";
 
-import { apiV1Data, apiV1List, getApiV1WorkspaceData, withApiV1 } from "@/lib/api-v1";
+import {
+  apiV1Data,
+  apiV1List,
+  getApiV1WorkspaceData,
+  readApiV1Json,
+  withApiV1,
+} from "@/lib/api-v1";
 import type { Issue } from "@/lib/domain";
 import { publishWorkspaceEvent } from "@/lib/events";
 import { executeIssueAction } from "@/modules/issues/service";
@@ -18,7 +24,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
 export async function POST(request: NextRequest): Promise<Response> {
   return withApiV1(request, "issues:write", async (context) => {
-    const payload: unknown = await request.json();
+    const payload = await readApiV1Json(request);
     const result = executeIssueAction(
       "issue.create",
       context.workspaceId,

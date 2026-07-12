@@ -80,6 +80,56 @@ const NO_STORE_HEADERS = {
   "X-Content-Type-Options": "nosniff",
 } as const;
 
+const DEFAULT_MAX_JSON_BYTES = 12 * 1024 * 1024;
+
+export async function readApiV1Json(
+  request: Request,
+  options: { readonly maxBytes?: number } = {},
+): Promise<unknown> {
+  const mediaType = request.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (
+    mediaType !== "application/json" &&
+    !(mediaType?.startsWith("application/") && mediaType.endsWith("+json"))
+  ) {
+    throw new ApiV1Error(
+      415,
+      "unsupported_media_type",
+      "The request Content-Type must be application/json.",
+    );
+  }
+
+  const maxBytes = Math.max(1, options.maxBytes ?? DEFAULT_MAX_JSON_BYTES);
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new ApiV1Error(413, "payload_too_large", "The JSON request body is too large.");
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) return JSON.parse("") as unknown;
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        throw new ApiV1Error(413, "payload_too_large", "The JSON request body is too large.");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return JSON.parse(text) as unknown;
+}
+
 function invalidToken(message = "The bearer token is invalid or no longer active."): ApiV1Error {
   return new ApiV1Error(
     401,

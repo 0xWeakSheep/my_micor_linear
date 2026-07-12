@@ -1,6 +1,11 @@
 import type { NextRequest } from "next/server";
 
-import { apiV1Data, getApiV1WorkspaceData, withApiV1 } from "@/lib/api-v1";
+import {
+  apiV1Data,
+  getApiV1WorkspaceData,
+  readApiV1Json,
+  withApiV1,
+} from "@/lib/api-v1";
 import type { Issue } from "@/lib/domain";
 import { publishWorkspaceEvent } from "@/lib/events";
 import { executeIssueAction } from "@/modules/issues/service";
@@ -46,7 +51,7 @@ export async function PATCH(
           candidate.identifier.toLowerCase() === issueId.toLowerCase()),
     );
     if (!issue) throw new ResourceNotFoundError("Issue not found.");
-    const changes: unknown = await request.json();
+    const changes = await readApiV1Json(request);
     const result = executeIssueAction(
       "issue.update",
       context.workspaceId,
