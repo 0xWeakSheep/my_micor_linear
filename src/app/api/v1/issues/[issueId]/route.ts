@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { apiV1Data, getApiV1WorkspaceData, withApiV1 } from "@/lib/api-v1";
 import type { Issue } from "@/lib/domain";
+import { publishWorkspaceEvent } from "@/lib/events";
 import { executeIssueAction } from "@/modules/issues/service";
 import {
   type MutationResult,
@@ -52,6 +53,12 @@ export async function PATCH(
       context.userId,
       { issueId: issue.id, changes },
     ) as MutationResult<Issue>;
+    publishWorkspaceEvent({
+      workspaceId: context.workspaceId,
+      actorId: context.userId,
+      type: result.eventType,
+      resourceId: result.resourceId,
+    });
     return apiV1Data(result.data);
   });
 }

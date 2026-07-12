@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 
 import { apiV1Data, apiV1List, getApiV1WorkspaceData, withApiV1 } from "@/lib/api-v1";
 import type { Issue } from "@/lib/domain";
+import { publishWorkspaceEvent } from "@/lib/events";
 import { executeIssueAction } from "@/modules/issues/service";
 import type { MutationResult } from "@/modules/shared/mutation";
 
@@ -24,6 +25,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       context.userId,
       payload,
     ) as MutationResult<Issue>;
+    publishWorkspaceEvent({
+      workspaceId: context.workspaceId,
+      actorId: context.userId,
+      type: result.eventType,
+      resourceId: result.resourceId,
+    });
     return apiV1Data(result.data, {
       status: 201,
       headers: { Location: `/api/v1/issues/${encodeURIComponent(result.resourceId)}` },

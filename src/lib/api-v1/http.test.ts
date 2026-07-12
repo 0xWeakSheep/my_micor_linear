@@ -20,6 +20,7 @@ import { GET as getTeams } from "@/app/api/v1/teams/route";
 import { apiV1Data, withApiV1 } from "@/lib/api-v1";
 import { closeDatabase, getDatabase, getOne } from "@/lib/db";
 import type { Issue, Membership, Project, Team } from "@/lib/domain";
+import { subscribeToWorkspace, type WorkspaceEvent } from "@/lib/events";
 import { hashOpaqueToken } from "@/lib/security";
 
 const TEST_TOKEN = "ml_test_workspace_a";
@@ -361,14 +362,35 @@ describe("REST API v1 resource isolation", () => {
 
 describe("REST API v1 issue mutations", () => {
   it("creates and updates an issue through the existing issue service", async () => {
-    const createResponse = await createIssue(
-      request("/api/v1/issues", TEST_TOKEN, {
-        method: "POST",
-        body: JSON.stringify({ teamId: "team_a_public", title: "Created over REST" }),
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    const created = (await createResponse.json()) as { data: Issue };
+    const events: WorkspaceEvent[] = [];
+    const unsubscribe = subscribeToWorkspace("ws_a", (event) => events.push(event));
+    let created: { data: Issue };
+    let createResponse: Response;
+    try {
+      createResponse = await createIssue(
+        request("/api/v1/issues", TEST_TOKEN, {
+          method: "POST",
+          body: JSON.stringify({ teamId: "team_a_public", title: "Created over REST" }),
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      created = (await createResponse.json()) as { data: Issue };
+
+      const updateResponse = await updateIssue(
+        request(`/api/v1/issues/${created.data.id}`, TEST_TOKEN, {
+          method: "PATCH",
+          body: JSON.stringify({ title: "Updated over REST", priority: 2 }),
+          headers: { "Content-Type": "application/json" },
+        }),
+        { params: Promise.resolve({ issueId: created.data.id }) },
+      );
+      const updated = (await updateResponse.json()) as { data: Issue };
+
+      expect(updateResponse.status).toBe(200);
+      expect(updated.data).toMatchObject({ title: "Updated over REST", priority: 2 });
+    } finally {
+      unsubscribe();
+    }
 
     expect(createResponse.status).toBe(201);
     expect(createResponse.headers.get("location")).toBe(`/api/v1/issues/${created.data.id}`);
@@ -379,18 +401,15 @@ describe("REST API v1 issue mutations", () => {
       title: "Created over REST",
     });
 
-    const updateResponse = await updateIssue(
-      request(`/api/v1/issues/${created.data.id}`, TEST_TOKEN, {
-        method: "PATCH",
-        body: JSON.stringify({ title: "Updated over REST", priority: 2 }),
-        headers: { "Content-Type": "application/json" },
-      }),
-      { params: Promise.resolve({ issueId: created.data.id }) },
-    );
-    const updated = (await updateResponse.json()) as { data: Issue };
-
-    expect(updateResponse.status).toBe(200);
-    expect(updated.data).toMatchObject({ title: "Updated over REST", priority: 2 });
+    expect(events.map((event) => event.type)).toEqual(["issue.created", "issue.updated"]);
+    expect(events.every((event) => event.resourceId === created.data.id)).toBe(true);
+    expect(
+      getOne<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM outbox_events
+          WHERE aggregate_id = ? AND type IN ('issue.created', 'issue.updated')`,
+        created.data.id,
+      )?.count,
+    ).toBe(2);
 
     const readResponse = await getIssue(request(`/api/v1/issues/${created.data.identifier}`), {
       params: Promise.resolve({ issueId: created.data.identifier }),
