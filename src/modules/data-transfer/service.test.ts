@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 vi.mock("server-only", () => ({}));
 
 import { closeDatabase, getDatabase } from "@/lib/db";
-import { ConflictError } from "@/modules/shared/mutation";
+import { ConflictError, ResourceNotFoundError } from "@/modules/shared/mutation";
 import { executeWorkspaceAction } from "@/modules/workspaces/service";
 import { exportWorkspaceData, importWorkspaceData } from "./service";
 
@@ -71,6 +71,92 @@ describe("workspace data transfer", () => {
   it("rejects malformed imports and guest exports", () => {
     expect(() => importWorkspaceData("ws_test", "usr_admin", { format: "csv", filename: "bad.csv", content: "Name\nMissing fields" })).toThrow("requires Title and Team");
     expect(() => exportWorkspaceData("ws_test", "usr_guest", { format: "json", scope: "workspace" })).toThrow();
+  });
+
+  it("does not import issues into an inaccessible private team", () => {
+    const now = "2026-07-11T00:00:00.000Z";
+    const database = getDatabase();
+    database.exec(`
+      INSERT INTO teams(
+        id, workspace_id, name, key, description, color, icon, is_private,
+        next_issue_number, created_at, updated_at
+      ) VALUES (
+        'team_private', 'ws_test', 'Private', 'PRI', '', '#111', 'P', 1,
+        1, '${now}', '${now}'
+      );
+      INSERT INTO workflow_states(
+        id, team_id, name, type, color, position, is_default, created_at
+      ) VALUES (
+        'state_private', 'team_private', 'Backlog', 'backlog', '#888', 100, 1, '${now}'
+      );
+    `);
+
+    expect(() =>
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: "private-team.json",
+        content: JSON.stringify({
+          data: {
+            teams: [{ id: "source_team", name: "Private", key: "PRI" }],
+            issues: [{ id: "source_issue", teamId: "source_team", title: "Injected" }],
+          },
+        }),
+      }),
+    ).toThrow(ResourceNotFoundError);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM issues").get()).toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM audit_logs").get()).toEqual({ count: 0 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM outbox_events").get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it("does not attach visible teams to an inaccessible private project", () => {
+    const now = "2026-07-11T00:00:00.000Z";
+    const database = getDatabase();
+    database.exec(`
+      INSERT INTO teams(
+        id, workspace_id, name, key, description, color, icon, is_private,
+        next_issue_number, created_at, updated_at
+      ) VALUES (
+        'team_private', 'ws_test', 'Private', 'PRI', '', '#111', 'P', 1,
+        1, '${now}', '${now}'
+      );
+      INSERT INTO projects(
+        id, workspace_id, team_id, name, slug, status, color, icon,
+        created_at, updated_at
+      ) VALUES (
+        'project_private', 'ws_test', 'team_private', 'Private project',
+        'private-project', 'started', '#222', 'P', '${now}', '${now}'
+      );
+      INSERT INTO project_teams(project_id, team_id)
+      VALUES ('project_private', 'team_private');
+    `);
+
+    expect(() =>
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: "private-project.json",
+        content: JSON.stringify({
+          data: {
+            teams: [{ id: "source_team", name: "Engineering", key: "ENG" }],
+            projects: [
+              {
+                id: "source_project",
+                name: "Private project",
+                slug: "private-project",
+                teamIds: ["source_team"],
+              },
+            ],
+            issues: [],
+          },
+        }),
+      }),
+    ).toThrow(ResourceNotFoundError);
+    expect(
+      database
+        .prepare("SELECT team_id AS teamId FROM project_teams WHERE project_id = 'project_private'")
+        .all(),
+    ).toEqual([{ teamId: "team_private" }]);
   });
 });
 

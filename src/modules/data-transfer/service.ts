@@ -2,7 +2,11 @@ import "server-only";
 
 import { z } from "zod";
 
-import { requireWorkspacePermission } from "@/lib/auth";
+import {
+  getTeamPermissionContext,
+  hasTeamPermission,
+  requireWorkspacePermission,
+} from "@/lib/auth";
 import { getBootstrapData } from "@/lib/bootstrap";
 import type { Database } from "@/lib/db";
 import { getDatabase, transaction } from "@/lib/db";
@@ -295,6 +299,37 @@ function createImportedTeam(database: Database, workspaceId: string, actorId: st
   return id;
 }
 
+function requireImportTeamAccess(actorId: string, teamId: string): void {
+  if (!hasTeamPermission(getTeamPermissionContext(actorId, teamId), "edit_issue")) {
+    throw new ResourceNotFoundError("Team not found.");
+  }
+}
+
+function requireImportProjectAccess(
+  database: Database,
+  workspaceId: string,
+  actorId: string,
+  projectId: string,
+): void {
+  const project = database
+    .prepare(
+      "SELECT 1 FROM projects WHERE id = ? AND workspace_id = ? AND trashed_at IS NULL",
+    )
+    .get(projectId, workspaceId);
+  if (!project) throw new ResourceNotFoundError("Project not found.");
+  const teamIds = database
+    .prepare("SELECT team_id AS teamId FROM project_teams WHERE project_id = ?")
+    .all(projectId) as Array<{ teamId: string }>;
+  if (
+    teamIds.length > 0 &&
+    !teamIds.some(({ teamId }) =>
+      hasTeamPermission(getTeamPermissionContext(actorId, teamId), "read"),
+    )
+  ) {
+    throw new ResourceNotFoundError("Project not found.");
+  }
+}
+
 function buildCsv(data: BootstrapData): string {
   const teams = new Map(data.teams.map((item) => [item.id, item]));
   const states = new Map(data.states.map((item) => [item.id, item]));
@@ -366,6 +401,7 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
     for (const source of normalized.teams) {
       const before = database.prepare("SELECT id FROM teams WHERE workspace_id = ? AND (key = ? COLLATE NOCASE OR name = ? COLLATE NOCASE)").get(workspaceId, source.key, source.name) as { id: string } | undefined;
       const id = before?.id ?? createImportedTeam(database, workspaceId, actorId, source, now);
+      if (before) requireImportTeamAccess(actorId, id);
       if (!before) created.teams += 1;
       teamMap.set(source.id, id);
     }
@@ -398,6 +434,7 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
       const slug = slugify(source.slug || source.name);
       const existing = database.prepare("SELECT id FROM projects WHERE workspace_id = ? AND (slug = ? OR name = ? COLLATE NOCASE)").get(workspaceId, slug, source.name) as { id: string } | undefined;
       let id = existing?.id;
+      if (id) requireImportProjectAccess(database, workspaceId, actorId, id);
       if (!id) {
         id = createId("project");
         const status = ["planned", "started", "paused", "completed", "canceled"].includes(source.status ?? "") ? source.status! : "planned";
@@ -430,8 +467,11 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
     const newlyCreated = new Set<string>();
     for (const source of normalized.issues) {
       if (source.identifier) {
-        const existing = database.prepare("SELECT id FROM issues WHERE workspace_id = ? AND identifier = ? COLLATE NOCASE").get(workspaceId, source.identifier) as { id: string } | undefined;
-        if (existing) { issueMap.set(source.id, existing.id); skipped += 1; continue; }
+        const existing = database.prepare("SELECT id, team_id AS teamId FROM issues WHERE workspace_id = ? AND identifier = ? COLLATE NOCASE").get(workspaceId, source.identifier) as { id: string; teamId: string } | undefined;
+        if (existing) {
+          requireImportTeamAccess(actorId, existing.teamId);
+          issueMap.set(source.id, existing.id); skipped += 1; continue;
+        }
       }
       const teamId = teamMap.get(source.teamId);
       if (!teamId) { warnings.push(`Skipped ${source.title}: team is unavailable.`); skipped += 1; continue; }
@@ -443,7 +483,10 @@ export function importWorkspaceData(workspaceId: string, actorId: string, input:
       const email = source.assigneeEmail || (source.assigneeId ? emailBySourceUser.get(source.assigneeId) : undefined);
       const assigneeId = email ? localUserByEmail.get(email.toLowerCase()) ?? null : null;
       let projectId = source.projectId ? projectMap.get(source.projectId) ?? null : null;
-      if (!projectId && source.projectName) projectId = (database.prepare("SELECT id FROM projects WHERE workspace_id = ? AND name = ? COLLATE NOCASE").get(workspaceId, source.projectName) as { id: string } | undefined)?.id ?? null;
+      if (!projectId && source.projectName) {
+        projectId = (database.prepare("SELECT id FROM projects WHERE workspace_id = ? AND name = ? COLLATE NOCASE").get(workspaceId, source.projectName) as { id: string } | undefined)?.id ?? null;
+        if (projectId) requireImportProjectAccess(database, workspaceId, actorId, projectId);
+      }
       const id = createId("issue"); const createdAt = safeDate(source.createdAt, now); const updatedAt = safeDate(source.updatedAt, now);
       database.prepare(`INSERT INTO issues(id, workspace_id, team_id, identifier, number, title, description, status_id, priority, assignee_id, creator_id, project_id, cycle_id, estimate, due_date, sort_order, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
         .run(id, workspaceId, teamId, identifier, sequence.number, source.title.slice(0, 500), source.description ?? "", statusId, source.priority ?? 0, assigneeId, actorId, projectId, source.cycleId ? cycleMap.get(source.cycleId) ?? null : null, source.estimate ?? null, source.dueDate ?? null, source.sortOrder ?? Date.now(), createdAt, updatedAt);
