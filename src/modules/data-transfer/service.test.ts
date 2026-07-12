@@ -54,6 +54,20 @@ describe("workspace data transfer", () => {
     expect(exported.filename).toMatch(/test-export-.*\.json/);
   });
 
+  it("accepts its own v1 snapshot without structural errors", () => {
+    const exported = exportWorkspaceData("ws_test", "usr_admin", {
+      format: "json",
+      scope: "workspace",
+    });
+    expect(
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: exported.filename,
+        content: exported.content,
+      }),
+    ).toMatchObject({ skipped: 1, created: { issues: 0 } });
+  });
+
   it("imports CSV issues atomically and records audit data", () => {
     const result = importWorkspaceData("ws_test", "usr_admin", {
       format: "csv",
@@ -71,6 +85,25 @@ describe("workspace data transfer", () => {
   it("rejects malformed imports and guest exports", () => {
     expect(() => importWorkspaceData("ws_test", "usr_admin", { format: "csv", filename: "bad.csv", content: "Name\nMissing fields" })).toThrow("requires Title and Team");
     expect(() => exportWorkspaceData("ws_test", "usr_guest", { format: "json", scope: "workspace" })).toThrow();
+  });
+
+  it("rejects malformed nested JSON before opening an import transaction", () => {
+    expect(() =>
+      importWorkspaceData("ws_test", "usr_admin", {
+        format: "json",
+        filename: "malformed.json",
+        content: JSON.stringify({
+          schema: "micro-linear.workspace.v1",
+          data: { teams: [{}], issues: [] },
+        }),
+      }),
+    ).toThrow(/Workspace JSON data is invalid at teams\.0\.id/);
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM audit_logs").get()).toEqual({
+      count: 0,
+    });
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM outbox_events").get()).toEqual({
+      count: 0,
+    });
   });
 
   it("does not import issues into an inaccessible private team", () => {

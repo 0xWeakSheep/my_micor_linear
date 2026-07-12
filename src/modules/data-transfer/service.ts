@@ -155,6 +155,109 @@ interface NormalizedImport {
   memberships: Array<{ userId: string; user: { email: string } }>;
 }
 
+const importIdSchema = z.string().trim().min(1).max(200);
+const importTeamSchema = z.object({
+  id: importIdSchema,
+  name: z.string().trim().min(1).max(100),
+  key: z.string().trim().min(1).max(32),
+  description: z.string().max(10_000).optional(),
+  color: z.string().max(64).optional(),
+  icon: z.string().max(64).optional(),
+  isPrivate: z.boolean().optional(),
+}).passthrough();
+const importStateSchema = z.object({
+  id: importIdSchema,
+  teamId: importIdSchema,
+  name: z.string().trim().min(1).max(100),
+  type: z.string().trim().min(1).max(40),
+  color: z.string().max(64).optional(),
+  position: z.number().finite().optional(),
+}).passthrough();
+const importLabelSchema = z.object({
+  id: importIdSchema,
+  name: z.string().trim().min(1).max(200),
+  color: z.string().max(64).optional(),
+  description: z.string().max(10_000).optional(),
+  groupName: z.string().max(200).nullable().optional(),
+}).passthrough();
+const importProjectSchema = z.object({
+  id: importIdSchema,
+  name: z.string().trim().min(1).max(300),
+  slug: z.string().max(300).optional(),
+  summary: z.string().max(10_000).optional(),
+  description: z.string().max(100_000).optional(),
+  status: z.string().max(40).optional(),
+  priority: z.number().int().min(0).max(4).optional(),
+  color: z.string().max(64).optional(),
+  icon: z.string().max(64).optional(),
+  startDate: z.string().max(40).nullable().optional(),
+  targetDate: z.string().max(40).nullable().optional(),
+  teamIds: z.array(importIdSchema).max(100).optional(),
+}).passthrough();
+const importCycleSchema = z.object({
+  id: importIdSchema,
+  teamId: importIdSchema,
+  number: z.number().int().positive(),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().max(10_000).optional(),
+  startDate: z.string().min(1).max(40),
+  endDate: z.string().min(1).max(40),
+  status: z.string().max(40).optional(),
+}).passthrough();
+const importIssueSchema = z.object({
+  id: importIdSchema,
+  teamId: importIdSchema,
+  identifier: z.string().max(200).optional(),
+  title: z.string().trim().min(1).max(500),
+  description: z.string().max(100_000).optional(),
+  statusId: importIdSchema.optional(),
+  statusName: z.string().max(100).optional(),
+  priority: z.number().int().min(0).max(4).optional(),
+  assigneeId: importIdSchema.nullable().optional(),
+  assigneeEmail: z.string().email().nullable().optional(),
+  projectId: importIdSchema.nullable().optional(),
+  projectName: z.string().max(300).nullable().optional(),
+  cycleId: importIdSchema.nullable().optional(),
+  parentId: importIdSchema.nullable().optional(),
+  estimate: z.number().int().min(0).nullable().optional(),
+  dueDate: z.string().max(40).nullable().optional(),
+  sortOrder: z.number().finite().optional(),
+  labelIds: z.array(importIdSchema).max(100).optional(),
+  labelNames: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  createdAt: z.string().max(60).optional(),
+  updatedAt: z.string().max(60).optional(),
+}).passthrough();
+const importCommentSchema = z.object({
+  id: importIdSchema,
+  issueId: importIdSchema,
+  authorId: importIdSchema.optional(),
+  authorEmail: z.string().email().optional(),
+  parentId: importIdSchema.nullable().optional(),
+  body: z.string().trim().min(1).max(100_000),
+  createdAt: z.string().max(60).optional(),
+  updatedAt: z.string().max(60).optional(),
+}).passthrough();
+const importRelationSchema = z.object({
+  issueId: importIdSchema,
+  relatedIssueId: importIdSchema,
+  type: z.enum(["related", "blocks", "duplicate"]),
+}).passthrough();
+const importMembershipSchema = z.object({
+  userId: importIdSchema,
+  user: z.object({ email: z.string().email() }).passthrough(),
+}).passthrough();
+const normalizedImportSchema = z.object({
+  teams: z.array(importTeamSchema).default([]),
+  states: z.array(importStateSchema).default([]),
+  labels: z.array(importLabelSchema).default([]),
+  projects: z.array(importProjectSchema).default([]),
+  cycles: z.array(importCycleSchema).default([]),
+  issues: z.array(importIssueSchema).default([]),
+  comments: z.array(importCommentSchema).default([]),
+  relations: z.array(importRelationSchema).default([]),
+  memberships: z.array(importMembershipSchema).default([]),
+}).passthrough();
+
 const exportPayloadSchema = z.object({
   format: z.enum(["json", "csv"]),
   scope: z.literal("workspace").default("workspace"),
@@ -173,11 +276,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function arrayValue<T>(record: Record<string, unknown>, key: string): T[] {
-  const value = record[key];
-  return Array.isArray(value) ? (value as T[]) : [];
-}
-
 function normalizeJsonImport(content: string): NormalizedImport {
   let parsed: unknown;
   try {
@@ -193,21 +291,15 @@ function normalizeJsonImport(content: string): NormalizedImport {
     throw new DomainValidationError("Workspace JSON schema is missing or unsupported.");
   }
   const data = asRecord(root.data);
-  const issues = arrayValue<ImportIssue>(data, "issues");
-  if (issues.some((issue) => !issue || typeof issue.title !== "string" || typeof issue.teamId !== "string")) {
-    throw new DomainValidationError("JSON issues must include title and teamId.");
+  const normalized = normalizedImportSchema.safeParse(data);
+  if (!normalized.success) {
+    const issue = normalized.error.issues[0];
+    const path = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
+    throw new DomainValidationError(
+      `Workspace JSON data is invalid${path}: ${issue?.message ?? "invalid value"}.`,
+    );
   }
-  return {
-    teams: arrayValue<ImportTeam>(data, "teams"),
-    states: arrayValue<ImportState>(data, "states"),
-    labels: arrayValue<ImportLabel>(data, "labels"),
-    projects: arrayValue<ImportProject>(data, "projects"),
-    cycles: arrayValue<ImportCycle>(data, "cycles"),
-    issues,
-    comments: arrayValue<ImportComment>(data, "comments"),
-    relations: arrayValue<ImportRelation>(data, "relations"),
-    memberships: arrayValue<NormalizedImport["memberships"][number]>(data, "memberships"),
-  };
+  return normalized.data as NormalizedImport;
 }
 
 function cell(record: Record<string, string>, ...names: string[]): string {
