@@ -214,25 +214,35 @@ function tableCounts(database: DatabaseSync): Record<string, number> {
   return counts;
 }
 
+function hasValidMigrationHistory(
+  applied: Array<{ version: number; name: string }>,
+): boolean {
+  return applied.length > 0 && applied.every((migration, index) => {
+    const expected = migrations[index];
+    return expected?.version === migration.version && expected.name === migration.name;
+  });
+}
+
 function inspectOpenDatabase(database: DatabaseSync, path: string): DatabaseIntegrityResult {
   const integrityCheck = (
     database.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>
   ).map((row) => String(row.integrity_check));
   const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all().length;
   const applied = readMigrations(database);
-  const future = applied.filter((migration) => migration.version > latestMigrationVersion());
+  const counts = tableCounts(database);
   const ok =
     integrityCheck.length === 1 &&
     integrityCheck[0] === "ok" &&
     foreignKeyViolations === 0 &&
-    future.length === 0;
+    hasValidMigrationHistory(applied) &&
+    CORE_TABLES.every((table) => Object.hasOwn(counts, table));
   return {
     path: resolve(path),
     ok,
     integrityCheck,
     foreignKeyViolations,
     migrations: applied,
-    tableCounts: tableCounts(database),
+    tableCounts: counts,
   };
 }
 
@@ -488,6 +498,9 @@ export function listBackupBundles(backupDirectory: string): BackupListEntry[] {
 
 function applyMissingMigrations(database: DatabaseSync): number[] {
   const appliedRows = readMigrations(database);
+  if (!hasValidMigrationHistory(appliedRows)) {
+    throw new Error("Backup migration history does not match this application.");
+  }
   const applied = new Set(appliedRows.map((migration) => migration.version));
   const future = appliedRows.filter((migration) => migration.version > latestMigrationVersion());
   if (future.length) {

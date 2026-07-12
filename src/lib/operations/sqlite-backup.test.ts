@@ -190,6 +190,32 @@ describe("SQLite backup bundles", () => {
     expect(listBackupBundles(paths.backupDirectory)).toEqual([]);
   });
 
+  it("rejects a migration-only database without required application tables", () => {
+    const root = temporaryDirectory();
+    const databasePath = join(root, "empty-shell.db");
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      ) STRICT;
+    `);
+    const insert = database.prepare(
+      "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+    );
+    for (const migration of migrations) {
+      insert.run(migration.version, migration.name, NOW);
+    }
+    database.close();
+
+    expect(checkDatabaseIntegrity(databasePath)).toMatchObject({
+      ok: false,
+      migrations: migrations.map(({ version, name }) => ({ version, name })),
+      tableCounts: {},
+    });
+  });
+
   it("continues to verify backup bundles created before the brand migration", async () => {
     const paths = fixture();
     const backup = await createBackupBundle({
