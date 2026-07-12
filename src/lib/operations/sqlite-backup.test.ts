@@ -175,6 +175,25 @@ describe("SQLite backup bundles", () => {
     expect(checkDatabaseIntegrity(paths.databasePath)).toMatchObject({ ok: true });
   });
 
+  it("marks a bundle invalid when its database file is missing", async () => {
+    const paths = fixture();
+    const backup = await createBackupBundle({
+      databasePath: paths.databasePath,
+      uploadDirectory: paths.uploadDirectory,
+      backupDirectory: paths.backupDirectory,
+      now: new Date(NOW),
+    });
+    rmSync(join(backup.bundlePath, "micro-linear.sqlite"));
+
+    expect(listBackupBundles(paths.backupDirectory)).toMatchObject([
+      {
+        path: backup.bundlePath,
+        valid: false,
+        error: expect.stringMatching(/database is missing/i),
+      },
+    ]);
+  });
+
   it("fails safely when a database-referenced upload is missing", async () => {
     const paths = fixture();
     const descriptor = openSync(paths.attachmentPath, "r");

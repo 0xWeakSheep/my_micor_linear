@@ -473,6 +473,27 @@ export function listBackupBundles(backupDirectory: string): BackupListEntry[] {
       const path = join(root, entry.name);
       try {
         const manifest = parseManifest(path);
+        const databasePath = resolve(path, manifest.database.file);
+        if (!isWithin(path, databasePath) || !existsSync(databasePath)) {
+          throw new Error("Backup database is missing or leaves its bundle.");
+        }
+        assertRegularFile(databasePath, "Backup database");
+        if (statSync(databasePath).size !== manifest.database.sizeBytes) {
+          throw new Error("Backup database size does not match its manifest.");
+        }
+        const uploadRoot = resolve(path, manifest.uploads.directory);
+        if (!isWithin(path, uploadRoot)) throw new Error("Backup uploads path leaves its bundle.");
+        if (manifest.uploads.fileCount > 0 && !existsSync(uploadRoot)) {
+          throw new Error("Backup uploads directory is missing.");
+        }
+        for (const file of manifest.uploads.files) {
+          const uploadPath = safeStoragePath(uploadRoot, file.path);
+          if (!existsSync(uploadPath)) throw new Error(`Backup upload is missing: ${file.path}`);
+          assertRegularFile(uploadPath, "Backup upload");
+          if (statSync(uploadPath).size !== file.sizeBytes) {
+            throw new Error(`Backup upload size does not match: ${file.path}`);
+          }
+        }
         return {
           path,
           name: entry.name,
