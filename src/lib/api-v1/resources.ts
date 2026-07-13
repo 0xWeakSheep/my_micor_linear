@@ -3,17 +3,23 @@ import "server-only";
 import { requireWorkspacePermission } from "@/lib/auth";
 import { getBootstrapData } from "@/lib/bootstrap";
 import { getAll } from "@/lib/db";
-import type { BootstrapData, Issue } from "@/lib/domain";
+import type { BootstrapData, Issue, Team } from "@/lib/domain";
 
 import type { ApiV1Context, ApiV1PageInfo } from "./http";
 import { encodeApiV1Cursor, readApiV1Pagination } from "./pagination";
 
 type IssueCursor = readonly [updatedAt: string, id: string];
+type TeamCursor = readonly [name: string, id: string];
 
 interface IssueRow extends Omit<Issue, "labelIds" | "priority" | "subscriberIds"> {
   readonly label_ids_json: string;
   readonly priority: number;
   readonly subscriber_ids_json: string;
+}
+
+interface TeamRow extends Omit<Team, "isPrivate" | "triageEnabled"> {
+  readonly isPrivate: number;
+  readonly triageEnabled: number;
 }
 
 export interface ApiV1ResourcePage<T> {
@@ -33,6 +39,17 @@ function parseJsonArray(value: string): string[] {
 }
 
 function isIssueCursor(value: unknown): value is IssueCursor {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    value[0].length > 0 &&
+    typeof value[1] === "string" &&
+    value[1].length > 0
+  );
+}
+
+function isTeamCursor(value: unknown): value is TeamCursor {
   return (
     Array.isArray(value) &&
     value.length === 2 &&
@@ -137,6 +154,68 @@ export function getApiV1IssuePage(
             lastRow.updatedAt,
             lastRow.id,
           ] satisfies IssueCursor)
+        : null,
+      hasNextPage,
+      limit: pagination.limit,
+    },
+  };
+}
+
+export function getApiV1TeamPage(
+  request: Request,
+  context: ApiV1Context,
+): ApiV1ResourcePage<Team> {
+  requireWorkspacePermission(context.userId, context.workspaceId, "read");
+  const pagination = readApiV1Pagination(
+    request,
+    "teams",
+    context.workspaceId,
+    isTeamCursor,
+  );
+  const cursorClause = pagination.cursor
+    ? `AND (
+         t.name COLLATE NOCASE > ? OR
+         (t.name COLLATE NOCASE = ? AND t.id > ?)
+       )`
+    : "";
+  const cursorParameters = pagination.cursor
+    ? [pagination.cursor[0], pagination.cursor[0], pagination.cursor[1]]
+    : [];
+  const rows = getAll<TeamRow>(
+    `SELECT t.id, t.workspace_id AS workspaceId, t.name, t.key,
+            t.description, t.color, t.icon, t.is_private AS isPrivate,
+            t.triage_enabled AS triageEnabled, t.created_at AS createdAt
+       FROM teams t
+       LEFT JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ?
+      WHERE t.workspace_id = ?
+        AND (
+          (t.is_private = 0 AND ? IN ('admin', 'member')) OR
+          tm.user_id IS NOT NULL
+        )
+        ${cursorClause}
+      ORDER BY t.name COLLATE NOCASE ASC, t.id ASC
+      LIMIT ?`,
+    context.userId,
+    context.workspaceId,
+    context.role,
+    ...cursorParameters,
+    pagination.limit + 1,
+  );
+  const hasNextPage = rows.length > pagination.limit;
+  const pageRows = rows.slice(0, pagination.limit);
+  const lastRow = pageRows.at(-1);
+  return {
+    data: pageRows.map((row) => ({
+      ...row,
+      isPrivate: Boolean(row.isPrivate),
+      triageEnabled: Boolean(row.triageEnabled),
+    })),
+    pageInfo: {
+      endCursor: lastRow
+        ? encodeApiV1Cursor("teams", context.workspaceId, [
+            lastRow.name,
+            lastRow.id,
+          ] satisfies TeamCursor)
         : null,
       hasNextPage,
       limit: pagination.limit,

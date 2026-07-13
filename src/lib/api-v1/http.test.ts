@@ -99,6 +99,17 @@ function insertFixture(): void {
     CREATED_AT,
   );
   insertTeam.run(
+    "team_a_second",
+    "ws_a",
+    "Z Public",
+    "ZED",
+    "Z",
+    0,
+    1,
+    CREATED_AT,
+    CREATED_AT,
+  );
+  insertTeam.run(
     "team_b_public",
     "ws_b",
     "B Public",
@@ -392,8 +403,11 @@ describe("REST API v1 resource isolation", () => {
     const issues = (await issueResponse.json()) as { data: Issue[]; meta: { count: number } };
 
     expect(teamResponse.status).toBe(200);
-    expect(teams.data.map((team) => team.id)).toEqual(["team_a_public"]);
-    expect(teams.meta.count).toBe(1);
+    expect(teams.data.map((team) => team.id)).toEqual([
+      "team_a_public",
+      "team_a_second",
+    ]);
+    expect(teams.meta.count).toBe(2);
     expect(projects.data.map((project) => project.id)).toEqual(["project_a_public"]);
     expect(issues.data.map((issue) => issue.id)).toEqual([
       "issue_a_page_1",
@@ -458,6 +472,30 @@ describe("REST API v1 resource isolation", () => {
     expect((await invalid.json()) as object).toMatchObject({
       error: { code: "invalid_pagination" },
     });
+  });
+
+  it("paginates accessible teams without exposing private teams", async () => {
+    const firstResponse = await getTeams(request("/api/v1/teams?limit=1"));
+    const first = (await firstResponse.json()) as {
+      data: Team[];
+      meta: {
+        pageInfo: { endCursor: string | null; hasNextPage: boolean; limit: number };
+      };
+    };
+    expect(first.data.map((team) => team.id)).toEqual(["team_a_public"]);
+    expect(first.meta.pageInfo).toMatchObject({ hasNextPage: true, limit: 1 });
+
+    const secondResponse = await getTeams(
+      request(
+        `/api/v1/teams?limit=1&cursor=${encodeURIComponent(first.meta.pageInfo.endCursor ?? "")}`,
+      ),
+    );
+    const second = (await secondResponse.json()) as {
+      data: Team[];
+      meta: { pageInfo: { hasNextPage: boolean } };
+    };
+    expect(second.data.map((team) => team.id)).toEqual(["team_a_second"]);
+    expect(second.meta.pageInfo.hasNextPage).toBe(false);
   });
 
   it("lists workspace members without leaking another workspace membership", async () => {
