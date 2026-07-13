@@ -99,7 +99,12 @@ export function readApiV1Pagination<TCursor>(
   }
 
   const encodedCursor = cursorValues[0];
-  if (!encodedCursor) return { cursor: null, limit: parseLimit(searchParams) };
+  if (encodedCursor === undefined) {
+    return { cursor: null, limit: parseLimit(searchParams) };
+  }
+  if (encodedCursor.length === 0) {
+    throw invalidPagination("The cursor query parameter is invalid.");
+  }
 
   const position = decodeCursor(encodedCursor, resource, workspaceId);
   if (!isCursor(position)) {

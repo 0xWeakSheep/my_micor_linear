@@ -61,6 +61,7 @@ describe("REST API v1 cursor pagination", () => {
     ]);
     const wrongShape = encodeApiV1Cursor("issues", "ws_a", [100, "issue_1"]);
     const requests = [
+      new Request("https://micro-linear.test/api/v1/issues?cursor="),
       new Request("https://micro-linear.test/api/v1/issues?cursor=not%20base64"),
       new Request("https://micro-linear.test/api/v1/issues?cursor=a&cursor=b"),
       new Request(`https://micro-linear.test/api/v1/issues?cursor=${projectCursor}`),
