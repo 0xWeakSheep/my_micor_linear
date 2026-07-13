@@ -26,6 +26,7 @@ import { hashOpaqueToken } from "@/lib/security";
 const TEST_TOKEN = "ml_test_workspace_a";
 const READ_ONLY_TOKEN = "ml_test_read_only";
 const WRITE_ONLY_TOKEN = "ml_test_write_only";
+const GUEST_TOKEN = "ml_test_guest";
 const EXPIRED_TOKEN = "ml_test_expired";
 const CREATED_AT = "2026-07-01T00:00:00.000Z";
 
@@ -54,6 +55,7 @@ function insertFixture(): void {
   );
   insertUser.run("usr_actor", "API Actor", "actor@micro-linear.test", CREATED_AT, CREATED_AT);
   insertUser.run("usr_other", "Other Member", "other@micro-linear.test", CREATED_AT, CREATED_AT);
+  insertUser.run("usr_guest", "Guest User", "guest@micro-linear.test", CREATED_AT, CREATED_AT);
 
   const insertWorkspace = database.prepare(
     `INSERT INTO workspaces(id, name, slug, icon, timezone, created_at, updated_at)
@@ -68,6 +70,7 @@ function insertFixture(): void {
   );
   insertMembership.run("wmem_actor_a", "ws_a", "usr_actor", "member", CREATED_AT);
   insertMembership.run("wmem_other_a", "ws_a", "usr_other", "member", CREATED_AT);
+  insertMembership.run("wmem_guest_a", "ws_a", "usr_guest", "guest", CREATED_AT);
   insertMembership.run("wmem_actor_b", "ws_b", "usr_actor", "member", CREATED_AT);
 
   const insertTeam = database.prepare(
@@ -126,6 +129,12 @@ function insertFixture(): void {
        VALUES (?, 'usr_actor', 'member', ?)`,
     )
     .run("team_a_public", CREATED_AT);
+  database
+    .prepare(
+      `INSERT INTO team_members(team_id, user_id, role, joined_at)
+       VALUES ('team_a_public', 'usr_guest', 'member', ?)`,
+    )
+    .run(CREATED_AT);
   database
     .prepare(
       `INSERT INTO team_members(team_id, user_id, role, joined_at)
@@ -303,6 +312,16 @@ function insertFixture(): void {
     "2020-01-01T00:00:00.000Z",
     CREATED_AT,
   );
+  database
+    .prepare(
+      `INSERT INTO api_keys(
+         id, workspace_id, user_id, name, prefix, token_hash, scopes_json,
+         expires_at, created_at
+       ) VALUES (
+         'key_guest', 'ws_a', 'usr_guest', 'Guest token', 'ml_test', ?, ?, NULL, ?
+       )`,
+    )
+    .run(hashOpaqueToken(GUEST_TOKEN), JSON.stringify(["workspace:read"]), CREATED_AT);
 }
 
 beforeAll(() => {
@@ -542,9 +561,46 @@ describe("REST API v1 resource isolation", () => {
     expect(response.status).toBe(200);
     expect(body.data.map((membership) => membership.id).sort()).toEqual([
       "wmem_actor_a",
+      "wmem_guest_a",
       "wmem_other_a",
     ]);
     expect(body.data.every((membership) => membership.workspaceId === "ws_a")).toBe(true);
+  });
+
+  it("paginates members and preserves restricted guest visibility", async () => {
+    const firstResponse = await getMembers(request("/api/v1/members?limit=2"));
+    const first = (await firstResponse.json()) as {
+      data: Membership[];
+      meta: {
+        pageInfo: { endCursor: string | null; hasNextPage: boolean; limit: number };
+      };
+    };
+    expect(first.data.map((membership) => membership.id)).toEqual([
+      "wmem_actor_a",
+      "wmem_guest_a",
+    ]);
+    expect(first.meta.pageInfo).toMatchObject({ hasNextPage: true, limit: 2 });
+
+    const secondResponse = await getMembers(
+      request(
+        `/api/v1/members?limit=2&cursor=${encodeURIComponent(first.meta.pageInfo.endCursor ?? "")}`,
+      ),
+    );
+    const second = (await secondResponse.json()) as {
+      data: Membership[];
+      meta: { pageInfo: { hasNextPage: boolean } };
+    };
+    expect(second.data.map((membership) => membership.id)).toEqual(["wmem_other_a"]);
+    expect(second.meta.pageInfo.hasNextPage).toBe(false);
+
+    const guestResponse = await getMembers(
+      request("/api/v1/members?limit=10", GUEST_TOKEN),
+    );
+    const guest = (await guestResponse.json()) as { data: Membership[] };
+    expect(guest.data.map((membership) => membership.id)).toEqual([
+      "wmem_actor_a",
+      "wmem_guest_a",
+    ]);
   });
 });
 

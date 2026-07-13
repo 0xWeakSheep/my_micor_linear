@@ -19,6 +19,7 @@ export {
 } from "./pagination";
 export {
   getApiV1IssuePage,
+  getApiV1MemberPage,
   getApiV1ProjectPage,
   getApiV1TeamPage,
   getApiV1WorkspaceData,

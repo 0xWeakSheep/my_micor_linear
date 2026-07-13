@@ -3,12 +3,20 @@ import "server-only";
 import { requireWorkspacePermission } from "@/lib/auth";
 import { getBootstrapData } from "@/lib/bootstrap";
 import { getAll } from "@/lib/db";
-import type { BootstrapData, Issue, Project, Team } from "@/lib/domain";
+import type {
+  BootstrapData,
+  Issue,
+  Membership,
+  Project,
+  Team,
+  WorkspaceRole,
+} from "@/lib/domain";
 
 import type { ApiV1Context, ApiV1PageInfo } from "./http";
 import { encodeApiV1Cursor, readApiV1Pagination } from "./pagination";
 
 type IssueCursor = readonly [updatedAt: string, id: string];
+type MemberCursor = readonly [name: string, id: string];
 type ProjectCursor = readonly [sortOrder: number, name: string, id: string];
 type TeamCursor = readonly [name: string, id: string];
 
@@ -28,6 +36,19 @@ interface ProjectRow extends Omit<Project, "memberIds" | "priority" | "teamIds">
   readonly member_ids_json: string;
   readonly priority: number;
   readonly team_ids_json: string;
+}
+
+interface MembershipRow {
+  readonly id: string;
+  readonly joined_at: string;
+  readonly role: WorkspaceRole;
+  readonly status: Membership["status"];
+  readonly user_avatar_url: string | null;
+  readonly user_created_at: string;
+  readonly user_email: string;
+  readonly user_id: string;
+  readonly user_name: string;
+  readonly workspace_id: string;
 }
 
 export interface ApiV1ResourcePage<T> {
@@ -81,6 +102,17 @@ function isProjectCursor(value: unknown): value is ProjectCursor {
   );
 }
 
+function isMemberCursor(value: unknown): value is MemberCursor {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    value[0].length > 0 &&
+    typeof value[1] === "string" &&
+    value[1].length > 0
+  );
+}
+
 function issueFromRow(row: IssueRow): Issue {
   const { label_ids_json, subscriber_ids_json, ...issue } = row;
   return {
@@ -100,6 +132,34 @@ function projectFromRow(row: ProjectRow): Project {
     priority: row.priority as Project["priority"],
     teamIds: parseJsonArray(team_ids_json),
   };
+}
+
+function membershipFromRow(row: MembershipRow): Membership {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    userId: row.user_id,
+    role: row.role,
+    status: row.status,
+    joinedAt: row.joined_at,
+    user: {
+      id: row.user_id,
+      name: row.user_name,
+      email: row.user_email,
+      avatarUrl: row.user_avatar_url,
+      createdAt: row.user_created_at,
+    },
+  };
+}
+
+function compareMemberPosition(
+  left: Pick<Membership, "id" | "user">,
+  right: MemberCursor,
+): number {
+  const byName = left.user.name.localeCompare(right[0], "en", {
+    sensitivity: "base",
+  });
+  return byName || left.id.localeCompare(right[1]);
 }
 
 export function getApiV1WorkspaceData(context: ApiV1Context): BootstrapData {
@@ -358,6 +418,74 @@ export function getApiV1ProjectPage(
             lastRow.name,
             lastRow.id,
           ] satisfies ProjectCursor)
+        : null,
+      hasNextPage,
+      limit: pagination.limit,
+    },
+  };
+}
+
+export function getApiV1MemberPage(
+  request: Request,
+  context: ApiV1Context,
+): ApiV1ResourcePage<Membership> {
+  requireWorkspacePermission(context.userId, context.workspaceId, "read");
+  const pagination = readApiV1Pagination(
+    request,
+    "members",
+    context.workspaceId,
+    isMemberCursor,
+  );
+
+  let memberships: Membership[];
+  if (context.role === "guest") {
+    memberships = [...getBootstrapData(context.userId, context.workspaceSlug).memberships].sort(
+      (left, right) => compareMemberPosition(left, [right.user.name, right.id]),
+    );
+    const cursor = pagination.cursor;
+    if (cursor) {
+      memberships = memberships.filter(
+        (membership) => compareMemberPosition(membership, cursor) > 0,
+      );
+    }
+    memberships = memberships.slice(0, pagination.limit + 1);
+  } else {
+    const cursorClause = pagination.cursor
+      ? `AND (
+           u.name COLLATE NOCASE > ? OR
+           (u.name COLLATE NOCASE = ? AND wm.id > ?)
+         )`
+      : "";
+    const cursorParameters = pagination.cursor
+      ? [pagination.cursor[0], pagination.cursor[0], pagination.cursor[1]]
+      : [];
+    memberships = getAll<MembershipRow>(
+      `SELECT wm.id, wm.workspace_id, wm.user_id, wm.role, wm.status, wm.joined_at,
+              u.name AS user_name, u.email AS user_email,
+              u.avatar_url AS user_avatar_url, u.created_at AS user_created_at
+         FROM workspace_members wm
+         JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = ?
+          ${cursorClause}
+        ORDER BY u.name COLLATE NOCASE ASC, wm.id ASC
+        LIMIT ?`,
+      context.workspaceId,
+      ...cursorParameters,
+      pagination.limit + 1,
+    ).map(membershipFromRow);
+  }
+
+  const hasNextPage = memberships.length > pagination.limit;
+  const data = memberships.slice(0, pagination.limit);
+  const lastMembership = data.at(-1);
+  return {
+    data,
+    pageInfo: {
+      endCursor: lastMembership
+        ? encodeApiV1Cursor("members", context.workspaceId, [
+            lastMembership.user.name,
+            lastMembership.id,
+          ] satisfies MemberCursor)
         : null,
       hasNextPage,
       limit: pagination.limit,
