@@ -63,6 +63,11 @@ export interface ApiV1DataBody<T> {
   readonly meta?: Readonly<Record<string, unknown>>;
 }
 
+export interface ApiV1PageInfo {
+  readonly endCursor: string | null;
+  readonly hasNextPage: boolean;
+}
+
 export class ApiV1Error extends Error {
   constructor(
     readonly status: number,
@@ -290,6 +295,20 @@ export function apiV1List<T>(
 ): NextResponse<ApiV1DataBody<readonly T[]>> {
   return apiV1Data(data, {
     meta: { count: data.length, workspaceId: context.workspaceId },
+  });
+}
+
+export function apiV1Page<T>(
+  data: readonly T[],
+  context: Pick<ApiV1Context, "workspaceId">,
+  pageInfo: ApiV1PageInfo,
+): NextResponse<ApiV1DataBody<readonly T[]>> {
+  return apiV1Data(data, {
+    meta: {
+      count: data.length,
+      pageInfo,
+      workspaceId: context.workspaceId,
+    },
   });
 }
 
