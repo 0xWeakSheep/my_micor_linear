@@ -2,8 +2,8 @@ import type { NextRequest } from "next/server";
 
 import {
   apiV1Data,
-  apiV1List,
-  getApiV1WorkspaceData,
+  apiV1Page,
+  getApiV1IssuePage,
   readApiV1Json,
   withApiV1,
 } from "@/lib/api-v1";
@@ -17,8 +17,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<Response> {
   return withApiV1(request, "issues:read", (context) => {
-    const { issues } = getApiV1WorkspaceData(context);
-    return apiV1List(issues.filter((issue) => !issue.trashedAt), context);
+    const page = getApiV1IssuePage(request, context);
+    return apiV1Page(page.data, context, page.pageInfo);
   });
 }
 

@@ -17,4 +17,8 @@ export {
   readApiV1Pagination,
   type ApiV1Pagination,
 } from "./pagination";
-export { getApiV1WorkspaceData } from "./resources";
+export {
+  getApiV1IssuePage,
+  getApiV1WorkspaceData,
+  type ApiV1ResourcePage,
+} from "./resources";

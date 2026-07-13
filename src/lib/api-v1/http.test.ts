@@ -172,26 +172,50 @@ function insertFixture(): void {
   insertProjectTeam.run("project_b_public", "team_b_public");
 
   const insertIssue = database.prepare(
-    `INSERT INTO issues(
+     `INSERT INTO issues(
        id, workspace_id, team_id, identifier, number, title, status_id,
        creator_id, sort_order, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, 1, ?, ?, 'usr_actor', 100, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'usr_actor', 100, ?, ?)`,
   );
   insertIssue.run(
     "issue_a_public",
     "ws_a",
     "team_a_public",
     "PUB-1",
+    1,
     "Visible A issue",
     "state_a_public",
     CREATED_AT,
     CREATED_AT,
   );
   insertIssue.run(
+    "issue_a_page_1",
+    "ws_a",
+    "team_a_public",
+    "PUB-10",
+    10,
+    "Newest visible issue",
+    "state_a_public",
+    CREATED_AT,
+    "2026-07-03T00:00:00.000Z",
+  );
+  insertIssue.run(
+    "issue_a_page_2",
+    "ws_a",
+    "team_a_public",
+    "PUB-11",
+    11,
+    "Second visible issue",
+    "state_a_public",
+    CREATED_AT,
+    "2026-07-02T00:00:00.000Z",
+  );
+  insertIssue.run(
     "issue_a_private",
     "ws_a",
     "team_a_private",
     "PRI-1",
+    1,
     "Hidden private issue",
     "state_a_private",
     CREATED_AT,
@@ -202,6 +226,7 @@ function insertFixture(): void {
     "ws_b",
     "team_b_public",
     "BEE-1",
+    1,
     "Other workspace issue",
     "state_b_public",
     CREATED_AT,
@@ -370,7 +395,11 @@ describe("REST API v1 resource isolation", () => {
     expect(teams.data.map((team) => team.id)).toEqual(["team_a_public"]);
     expect(teams.meta.count).toBe(1);
     expect(projects.data.map((project) => project.id)).toEqual(["project_a_public"]);
-    expect(issues.data.map((issue) => issue.id)).toEqual(["issue_a_public"]);
+    expect(issues.data.map((issue) => issue.id)).toEqual([
+      "issue_a_page_1",
+      "issue_a_page_2",
+      "issue_a_public",
+    ]);
     expect(issues.data.every((issue) => issue.workspaceId === "ws_a")).toBe(true);
   });
 
@@ -383,6 +412,52 @@ describe("REST API v1 resource isolation", () => {
 
     expect(list.data.some((issue) => issue.id === "issue_a_trashed")).toBe(false);
     expect(detailResponse.status).toBe(404);
+  });
+
+  it("paginates issues with a stable opaque cursor", async () => {
+    const firstResponse = await getIssues(request("/api/v1/issues?limit=2"));
+    const first = (await firstResponse.json()) as {
+      data: Issue[];
+      meta: {
+        count: number;
+        pageInfo: { endCursor: string | null; hasNextPage: boolean; limit: number };
+        workspaceId: string;
+      };
+    };
+    expect(first.data.map((issue) => issue.id)).toEqual([
+      "issue_a_page_1",
+      "issue_a_page_2",
+    ]);
+    expect(first.meta).toMatchObject({
+      count: 2,
+      pageInfo: { hasNextPage: true, limit: 2 },
+      workspaceId: "ws_a",
+    });
+    expect(first.meta.pageInfo.endCursor).toEqual(expect.any(String));
+
+    const secondResponse = await getIssues(
+      request(
+        `/api/v1/issues?limit=2&cursor=${encodeURIComponent(first.meta.pageInfo.endCursor ?? "")}`,
+      ),
+    );
+    const second = (await secondResponse.json()) as {
+      data: Issue[];
+      meta: {
+        count: number;
+        pageInfo: { endCursor: string | null; hasNextPage: boolean; limit: number };
+      };
+    };
+    expect(second.data.map((issue) => issue.id)).toEqual(["issue_a_public"]);
+    expect(second.meta).toMatchObject({
+      count: 1,
+      pageInfo: { hasNextPage: false, limit: 2 },
+    });
+
+    const invalid = await getIssues(request("/api/v1/issues?limit=0"));
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json()) as object).toMatchObject({
+      error: { code: "invalid_pagination" },
+    });
   });
 
   it("lists workspace members without leaking another workspace membership", async () => {
