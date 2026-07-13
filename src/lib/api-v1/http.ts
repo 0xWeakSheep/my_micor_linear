@@ -66,6 +66,7 @@ export interface ApiV1DataBody<T> {
 export interface ApiV1PageInfo {
   readonly endCursor: string | null;
   readonly hasNextPage: boolean;
+  readonly limit: number;
 }
 
 export class ApiV1Error extends Error {

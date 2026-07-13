@@ -23,12 +23,12 @@ function isIssueCursor(value: unknown): value is IssueCursor {
 describe("REST API v1 cursor pagination", () => {
   it("uses a bounded default and round-trips a resource cursor", () => {
     const position: IssueCursor = ["2026-07-13T00:00:00.000Z", "issue_10"];
-    const cursor = encodeApiV1Cursor("issues", position);
+    const cursor = encodeApiV1Cursor("issues", "ws_a", position);
     const request = new Request(
       `https://micro-linear.test/api/v1/issues?limit=25&cursor=${cursor}`,
     );
 
-    expect(readApiV1Pagination(request, "issues", isIssueCursor)).toEqual({
+    expect(readApiV1Pagination(request, "issues", "ws_a", isIssueCursor)).toEqual({
       cursor: position,
       limit: 25,
     });
@@ -36,6 +36,7 @@ describe("REST API v1 cursor pagination", () => {
       readApiV1Pagination(
         new Request("https://micro-linear.test/api/v1/issues"),
         "issues",
+        "ws_a",
         isIssueCursor,
       ),
     ).toEqual({ cursor: null, limit: 50 });
@@ -46,23 +47,31 @@ describe("REST API v1 cursor pagination", () => {
       readApiV1Pagination(
         new Request(`https://micro-linear.test/api/v1/issues?limit=${limit}`),
         "issues",
+        "ws_a",
         isIssueCursor,
       ),
     ).toThrowError(expect.objectContaining({ code: "invalid_pagination", status: 400 }));
   });
 
   it("rejects malformed, duplicated, mismatched and structurally invalid cursors", () => {
-    const projectCursor = encodeApiV1Cursor("projects", [100, "project_1"]);
-    const wrongShape = encodeApiV1Cursor("issues", [100, "issue_1"]);
+    const projectCursor = encodeApiV1Cursor("projects", "ws_a", [100, "project_1"]);
+    const wrongWorkspace = encodeApiV1Cursor("issues", "ws_b", [
+      "2026-07-13T00:00:00.000Z",
+      "issue_1",
+    ]);
+    const wrongShape = encodeApiV1Cursor("issues", "ws_a", [100, "issue_1"]);
     const requests = [
       new Request("https://micro-linear.test/api/v1/issues?cursor=not%20base64"),
       new Request("https://micro-linear.test/api/v1/issues?cursor=a&cursor=b"),
       new Request(`https://micro-linear.test/api/v1/issues?cursor=${projectCursor}`),
+      new Request(`https://micro-linear.test/api/v1/issues?cursor=${wrongWorkspace}`),
       new Request(`https://micro-linear.test/api/v1/issues?cursor=${wrongShape}`),
     ];
 
     for (const request of requests) {
-      expect(() => readApiV1Pagination(request, "issues", isIssueCursor)).toThrowError(
+      expect(() =>
+        readApiV1Pagination(request, "issues", "ws_a", isIssueCursor),
+      ).toThrowError(
         expect.objectContaining({ code: "invalid_pagination", status: 400 }),
       );
     }

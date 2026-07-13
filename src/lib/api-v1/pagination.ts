@@ -11,6 +11,7 @@ interface CursorEnvelope {
   readonly position: unknown;
   readonly resource: string;
   readonly version: typeof CURSOR_VERSION;
+  readonly workspaceId: string;
 }
 
 export interface ApiV1Pagination<TCursor> {
@@ -36,7 +37,7 @@ function parseLimit(searchParams: URLSearchParams): number {
   return limit;
 }
 
-function decodeCursor(value: string, resource: string): unknown {
+function decodeCursor(value: string, resource: string, workspaceId: string): unknown {
   if (
     value.length === 0 ||
     value.length > MAX_CURSOR_LENGTH ||
@@ -58,6 +59,8 @@ function decodeCursor(value: string, resource: string): unknown {
       parsed.version !== CURSOR_VERSION ||
       !("resource" in parsed) ||
       parsed.resource !== resource ||
+      !("workspaceId" in parsed) ||
+      parsed.workspaceId !== workspaceId ||
       !("position" in parsed)
     ) {
       throw invalidPagination("The cursor query parameter is invalid for this resource.");
@@ -69,11 +72,16 @@ function decodeCursor(value: string, resource: string): unknown {
   }
 }
 
-export function encodeApiV1Cursor<TCursor>(resource: string, position: TCursor): string {
+export function encodeApiV1Cursor<TCursor>(
+  resource: string,
+  workspaceId: string,
+  position: TCursor,
+): string {
   const envelope: CursorEnvelope = {
     position,
     resource,
     version: CURSOR_VERSION,
+    workspaceId,
   };
   return Buffer.from(JSON.stringify(envelope), "utf8").toString("base64url");
 }
@@ -81,6 +89,7 @@ export function encodeApiV1Cursor<TCursor>(resource: string, position: TCursor):
 export function readApiV1Pagination<TCursor>(
   request: Request,
   resource: string,
+  workspaceId: string,
   isCursor: (position: unknown) => position is TCursor,
 ): ApiV1Pagination<TCursor> {
   const searchParams = new URL(request.url).searchParams;
@@ -92,7 +101,7 @@ export function readApiV1Pagination<TCursor>(
   const encodedCursor = cursorValues[0];
   if (!encodedCursor) return { cursor: null, limit: parseLimit(searchParams) };
 
-  const position = decodeCursor(encodedCursor, resource);
+  const position = decodeCursor(encodedCursor, resource, workspaceId);
   if (!isCursor(position)) {
     throw invalidPagination("The cursor query parameter is invalid for this resource.");
   }
