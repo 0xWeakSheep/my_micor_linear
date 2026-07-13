@@ -1,19 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
-
-const appSans = Inter({
-  variable: "--font-app-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const appMono = JetBrains_Mono({
-  variable: "--font-app-mono",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: {
@@ -55,7 +42,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className={`${appSans.variable} ${appMono.variable}`}>
+      <body>
         {children}
         <Toaster
           position="bottom-center"
