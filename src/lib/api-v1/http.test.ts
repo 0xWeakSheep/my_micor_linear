@@ -167,6 +167,15 @@ function insertFixture(): void {
     CREATED_AT,
   );
   insertProject.run(
+    "project_a_second",
+    "ws_a",
+    "team_a_public",
+    "Z Project",
+    "z-project",
+    CREATED_AT,
+    CREATED_AT,
+  );
+  insertProject.run(
     "project_b_public",
     "ws_b",
     "team_b_public",
@@ -179,6 +188,7 @@ function insertFixture(): void {
     "INSERT INTO project_teams(project_id, team_id) VALUES (?, ?)",
   );
   insertProjectTeam.run("project_a_public", "team_a_public");
+  insertProjectTeam.run("project_a_second", "team_a_public");
   insertProjectTeam.run("project_a_private", "team_a_private");
   insertProjectTeam.run("project_b_public", "team_b_public");
 
@@ -408,7 +418,10 @@ describe("REST API v1 resource isolation", () => {
       "team_a_second",
     ]);
     expect(teams.meta.count).toBe(2);
-    expect(projects.data.map((project) => project.id)).toEqual(["project_a_public"]);
+    expect(projects.data.map((project) => project.id)).toEqual([
+      "project_a_public",
+      "project_a_second",
+    ]);
     expect(issues.data.map((issue) => issue.id)).toEqual([
       "issue_a_page_1",
       "issue_a_page_2",
@@ -495,6 +508,30 @@ describe("REST API v1 resource isolation", () => {
       meta: { pageInfo: { hasNextPage: boolean } };
     };
     expect(second.data.map((team) => team.id)).toEqual(["team_a_second"]);
+    expect(second.meta.pageInfo.hasNextPage).toBe(false);
+  });
+
+  it("paginates visible projects using a deterministic name tie-break", async () => {
+    const firstResponse = await getProjects(request("/api/v1/projects?limit=1"));
+    const first = (await firstResponse.json()) as {
+      data: Project[];
+      meta: {
+        pageInfo: { endCursor: string | null; hasNextPage: boolean; limit: number };
+      };
+    };
+    expect(first.data.map((project) => project.id)).toEqual(["project_a_public"]);
+    expect(first.meta.pageInfo).toMatchObject({ hasNextPage: true, limit: 1 });
+
+    const secondResponse = await getProjects(
+      request(
+        `/api/v1/projects?limit=1&cursor=${encodeURIComponent(first.meta.pageInfo.endCursor ?? "")}`,
+      ),
+    );
+    const second = (await secondResponse.json()) as {
+      data: Project[];
+      meta: { pageInfo: { hasNextPage: boolean } };
+    };
+    expect(second.data.map((project) => project.id)).toEqual(["project_a_second"]);
     expect(second.meta.pageInfo.hasNextPage).toBe(false);
   });
 
