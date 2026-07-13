@@ -47,7 +47,7 @@ npm run check        # 完整质量门禁
 Micro Linear 提供面向内部自动化的 REST API，基础地址为 `/api/v1`。API Key 在工作区设置中创建，密钥只展示一次；调用时通过标准 Bearer Header 传递：
 
 ```bash
-curl http://localhost:3000/api/v1/issues \
+curl 'http://localhost:3000/api/v1/issues?limit=50' \
   -H 'Authorization: Bearer ml_demo_seed_token'
 ```
 
@@ -58,7 +58,7 @@ curl http://localhost:3000/api/v1/issues \
 | `GET` | `/api/v1/issues` | `issues:read` | 列出可见 Issue |
 | `GET` | `/api/v1/issues/:id` | `issues:read` | 按 ID 或 `ENG-123` 标识读取 Issue |
 | `POST` | `/api/v1/issues` | `issues:write` | 创建 Issue |
-| `PATCH` | `/api/v1/issues/:id` | `issues:write` | 更新 Issue |
+| `PATCH` | `/api/v1/issues/:id` | `issues:read` + `issues:write` | 更新 Issue |
 | `GET` | `/api/v1/projects` | `projects:read` | 列出可见 Project |
 | `GET` | `/api/v1/teams` | `workspace:read` | 列出可见 Team |
 | `GET` | `/api/v1/members` | `workspace:read` | 列出可见工作区成员 |
@@ -77,7 +77,26 @@ curl -X PATCH http://localhost:3000/api/v1/issues/issue_eng_102 \
   --data '{"title":"Investigate payment timeout","assigneeId":"usr_maya"}'
 ```
 
-成功响应使用 `{ "data": ... }`；列表额外返回 `meta.count` 和 `meta.workspaceId`。当前版本一次返回全部可见记录，不分页。API Key 固定绑定创建它的用户和工作区，URL 或 Body 不能切换工作区；现有 RBAC、私有团队可见性、成员停用状态和密钥过期时间仍会在服务端强制执行。
+成功响应使用 `{ "data": ... }`。四个列表端点都支持 `limit`（默认 50，范围 1–100）和不透明的 `cursor`；服务端使用 `limit + 1` 查询判断是否存在下一页，不会为简单列表构造完整工作区数据图：
+
+```json
+{
+  "data": [],
+  "meta": {
+    "count": 0,
+    "workspaceId": "ws_example",
+    "pageInfo": {
+      "limit": 50,
+      "hasNextPage": false,
+      "endCursor": null
+    }
+  }
+}
+```
+
+`meta.count` 是本页条数；有下一页时，将 `meta.pageInfo.endCursor` 原样作为下一次请求的 `cursor`。Issue 按更新时间倒序，Project 按手工顺序和名称，Team/Member 按名称排序，所有排序都以 ID 作为最终稳定顺序。游标绑定资源类型和工作区，损坏、跨资源、跨工作区、空游标或非法 `limit` 会返回 400 `invalid_pagination`。
+
+API Key 固定绑定创建它的用户和工作区，URL 或 Body 不能切换工作区；现有 RBAC、私有团队可见性、Guest 成员目录裁剪、成员停用状态和密钥过期时间仍会在服务端强制执行。
 
 错误响应格式统一，并通过 `X-Request-Id` 响应头返回同一个请求 ID：
 
@@ -91,7 +110,7 @@ curl -X PATCH http://localhost:3000/api/v1/issues/issue_eng_102 \
 }
 ```
 
-常见错误码为 `authentication_required` / `invalid_token`（401）、`insufficient_scope` / `forbidden`（403）、`not_found`（404）、`conflict`（409）、`invalid_json` / `validation_error`（400）和 `internal_error`（500）。所有 API 响应均带 `Cache-Control: no-store`；有效密钥的 `last_used_at` 会在鉴权时更新。
+常见错误码为 `authentication_required` / `invalid_token`（401）、`insufficient_scope` / `forbidden`（403）、`not_found`（404）、`conflict`（409）、`invalid_json` / `invalid_pagination` / `validation_error`（400）和 `internal_error`（500）。所有 API 响应均带 `Cache-Control: no-store`；有效密钥的 `last_used_at` 会在鉴权时更新。
 
 ## 架构
 
