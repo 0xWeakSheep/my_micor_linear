@@ -389,6 +389,188 @@ describe("outbox webhook delivery", () => {
     ).toEqual([{ webhookId: "webhook_target" }]);
   });
 
+  it("replays the root delivery bytes and event identity only to the target webhook", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    const insertWebhook = database.prepare(
+      `INSERT INTO webhooks(
+        id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+        events_json, is_active, created_by_id, created_at, updated_at
+      ) VALUES (?, 'workspace_1', ?, ?, 'key', ?, '["issue.created"]', 1, 'user_1', ?, ?)`,
+    );
+    insertWebhook.run(
+      "webhook_target",
+      "Replay target",
+      "https://target.example.com/hook",
+      sealWebhookSecret("target-secret"),
+      CREATED_AT,
+      CREATED_AT,
+    );
+    insertWebhook.run(
+      "webhook_other",
+      "Other subscriber",
+      "https://other.example.com/hook",
+      sealWebhookSecret("other-secret"),
+      CREATED_AT,
+      CREATED_AT,
+    );
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, processed_at, created_at
+        ) VALUES (
+          'event_original', 'workspace_1', 'issue.created', 'issue', 'issue_1',
+          '{"ignored":"the replay must not regenerate this payload"}', ?, 1, ?, ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT, CREATED_AT);
+    const originalBody =
+      '{\n  "data": {"message":"café 上海","spaces":"  "},\n  "id": "event_original"\n}';
+    database
+      .prepare(
+        `INSERT INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, response_status,
+          response_body, attempt, created_at
+        ) VALUES (
+          'delivery_original', 'webhook_target', 'event_original', ?, 503,
+          'upstream unavailable', 1, ?
+        )`,
+      )
+      .run(originalBody, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, target_webhook_id, replay_of_delivery_id, created_at
+        ) VALUES (
+          'event_replay', 'workspace_1', 'issue.created', 'issue', 'issue_1',
+          '{"changed":true}', ?, 0, 'webhook_target', 'delivery_original', ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+
+    const requests: Array<{ url: string; body: string; headers: Headers }> = [];
+    const result = await deliverOutboxWebhooks(database, {
+      now: new Date(CREATED_AT),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImplementation: async (input, init) => {
+        requests.push({
+          url: String(input),
+          body: String(init?.body ?? ""),
+          headers: new Headers(init?.headers),
+        });
+        return new Response("accepted", { status: 202 });
+      },
+    });
+
+    expect(result).toMatchObject({ processedEvents: 1, delivered: 1 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe("https://target.example.com/hook");
+    expect(Buffer.from(requests[0]!.body).equals(Buffer.from(originalBody))).toBe(true);
+    expect(requests[0]!.headers.get("idempotency-key")).toBe(
+      "webhook_target:event_original",
+    );
+    expect(requests[0]!.headers.get("x-micro-linear-delivery")).toBe(
+      "webhook_target:event_original",
+    );
+    expect(requests[0]!.headers.get("x-orbit-delivery")).toBe(
+      "webhook_target:event_original",
+    );
+    expect(requests[0]!.headers.get("x-micro-linear-signature")).toBe(
+      `sha256=${createHmac("sha256", "target-secret").update(originalBody).digest("hex")}`,
+    );
+    expect(
+      database
+        .prepare(
+          `SELECT webhook_id AS webhookId, request_body AS requestBody
+             FROM webhook_deliveries WHERE event_id = 'event_replay'`,
+        )
+        .get(),
+    ).toEqual({ webhookId: "webhook_target", requestBody: originalBody });
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM webhook_deliveries
+            WHERE webhook_id = 'webhook_other'`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("terminates a replay whose source belongs to another webhook", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    const insertWebhook = database.prepare(
+      `INSERT INTO webhooks(
+        id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+        events_json, is_active, created_by_id, created_at, updated_at
+      ) VALUES (?, 'workspace_1', ?, ?, 'key', ?, '["issue.created"]', 1, 'user_1', ?, ?)`,
+    );
+    insertWebhook.run(
+      "webhook_target",
+      "Replay target",
+      "https://target.example.com/hook",
+      sealWebhookSecret("target-secret"),
+      CREATED_AT,
+      CREATED_AT,
+    );
+    insertWebhook.run(
+      "webhook_other",
+      "Wrong source",
+      "https://other.example.com/hook",
+      sealWebhookSecret("other-secret"),
+      CREATED_AT,
+      CREATED_AT,
+    );
+    database
+      .prepare(
+        `INSERT INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, attempt, created_at
+        ) VALUES (
+          'delivery_wrong_hook', 'webhook_other', 'event_original', '{"secret":true}', 1, ?
+        )`,
+      )
+      .run(CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, target_webhook_id, replay_of_delivery_id, created_at
+        ) VALUES (
+          'event_invalid_replay', 'workspace_1', 'issue.created', 'issue', 'issue_1',
+          '{"must":"not be sent"}', ?, 0, 'webhook_target', 'delivery_wrong_hook', ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    const result = await deliverOutboxWebhooks(database, {
+      now: new Date(CREATED_AT),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImplementation,
+    });
+
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ processedEvents: 1, terminalFailures: 1 });
+    expect(
+      database
+        .prepare(
+          `SELECT request_body AS requestBody, response_status AS responseStatus,
+                  response_body AS responseBody, next_attempt_at AS nextAttemptAt
+             FROM webhook_deliveries
+            WHERE webhook_id = 'webhook_target' AND event_id = 'event_invalid_replay'`,
+        )
+        .get(),
+    ).toEqual({
+      requestBody: "",
+      responseStatus: 0,
+      responseBody:
+        "PERMANENT: Replay source delivery is unavailable or belongs to a different webhook.",
+      nextAttemptAt: null,
+    });
+  });
+
   it("cancels a targeted delivery when its webhook is inactive", async () => {
     const database = createTestDatabase();
     seedWorkspace(database);

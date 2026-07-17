@@ -1,15 +1,24 @@
 import "server-only";
 
+import { z } from "zod";
+
 import { requireWorkspacePermission } from "@/lib/auth";
-import { getAll, getOne } from "@/lib/db";
+import { getAll, getOne, transaction } from "@/lib/db";
 import type {
   WebhookDeliveryPage,
+  WebhookDeliveryReplay,
   WebhookDeliveryStatus,
   WebhookDeliverySummary,
   WebhookReplayBlockReason,
 } from "@/lib/domain";
+import { createId } from "@/lib/security";
+import { unsealWebhookSecret } from "@/lib/webhook-secret";
 import {
+  ConflictError,
   DomainValidationError,
+  type MutationResult,
+  recordActivity,
+  recordAudit,
   ResourceNotFoundError,
 } from "@/modules/shared/mutation";
 
@@ -47,6 +56,34 @@ interface DeliveryHistoryRow {
   signing_ready: number;
   latest_attempt: number;
   has_newer_replay: number;
+}
+
+interface ReplayDeliveryRow {
+  id: string;
+  webhook_id: string;
+  event_id: string;
+  request_body: string;
+  response_status: number | null;
+  response_body: string | null;
+  attempt: number;
+  next_attempt_at: string | null;
+  delivered_at: string | null;
+  replay_of_delivery_id: string | null;
+  event_processed_at: string | null;
+  event_sequence: number | null;
+  webhook_active: number;
+  signing_secret_encrypted: string | null;
+}
+
+interface ReplayRootRow {
+  id: string;
+  webhook_id: string;
+  event_id: string;
+  request_body: string;
+  type: string;
+  aggregate_type: string;
+  aggregate_id: string;
+  payload_json: string;
 }
 
 function invalidPagination(message: string): never {
@@ -276,4 +313,215 @@ export function listWebhookDeliveries(
         ? encodeCursor(workspace.id, webhook.id, [last.created_at, last.id])
         : null,
   };
+}
+
+function replayConflict(message: string): never {
+  throw new ConflictError(message);
+}
+
+function getReplayDelivery(
+  workspaceId: string,
+  webhookId: string,
+  deliveryId: string,
+): ReplayDeliveryRow {
+  const row = getOne<ReplayDeliveryRow>(
+    `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
+            wd.response_status, wd.response_body, wd.attempt,
+            wd.next_attempt_at, wd.delivered_at,
+            oe.replay_of_delivery_id, oe.processed_at AS event_processed_at,
+            oe.rowid AS event_sequence, w.is_active AS webhook_active,
+            w.signing_secret_encrypted
+       FROM webhook_deliveries wd
+       JOIN webhooks w ON w.id = wd.webhook_id
+       LEFT JOIN outbox_events oe ON oe.id = wd.event_id
+      WHERE wd.id = ? AND wd.webhook_id = ? AND w.workspace_id = ?`,
+    deliveryId,
+    webhookId,
+    workspaceId,
+  );
+  if (!row) throw new ResourceNotFoundError("Webhook delivery not found.");
+  return row;
+}
+
+function validateReplaySource(
+  workspaceId: string,
+  source: ReplayDeliveryRow,
+): ReplayRootRow {
+  if (source.delivered_at || source.next_attempt_at) {
+    return replayConflict("Only a final failed webhook delivery can be replayed.");
+  }
+  if (source.response_status === null && source.response_body === null) {
+    return replayConflict("Only a final failed webhook delivery can be replayed.");
+  }
+  if (!source.event_processed_at || source.event_sequence === null) {
+    return replayConflict("Wait for the original event to finish before replaying it.");
+  }
+  if (!source.webhook_active) {
+    return replayConflict("Enable this webhook before replaying a delivery.");
+  }
+  if (!source.signing_secret_encrypted) {
+    return replayConflict("Rotate this webhook's signing secret before replaying a delivery.");
+  }
+  try {
+    unsealWebhookSecret(source.signing_secret_encrypted);
+  } catch {
+    return replayConflict("Rotate this webhook's signing secret before replaying a delivery.");
+  }
+
+  const newerAttempt = getOne<{ found: number }>(
+    `SELECT 1 AS found FROM webhook_deliveries
+      WHERE webhook_id = ? AND event_id = ? AND attempt > ?
+      LIMIT 1`,
+    source.webhook_id,
+    source.event_id,
+    source.attempt,
+  );
+  if (newerAttempt) {
+    return replayConflict("Replay the latest failed attempt for this event.");
+  }
+
+  const rootDeliveryId = source.replay_of_delivery_id ?? source.id;
+  const newerReplay = getOne<{ found: number }>(
+    `SELECT 1 AS found FROM outbox_events
+      WHERE target_webhook_id = ?
+        AND replay_of_delivery_id = ?
+        AND rowid > ?
+      LIMIT 1`,
+    source.webhook_id,
+    rootDeliveryId,
+    source.event_sequence,
+  );
+  if (newerReplay) {
+    return replayConflict("A newer replay already exists; use its latest failed delivery.");
+  }
+
+  const root = getOne<ReplayRootRow>(
+    `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
+            oe.type, oe.aggregate_type, oe.aggregate_id, oe.payload_json
+       FROM webhook_deliveries wd
+       JOIN outbox_events oe ON oe.id = wd.event_id
+      WHERE wd.id = ? AND wd.webhook_id = ? AND oe.workspace_id = ?`,
+    rootDeliveryId,
+    source.webhook_id,
+    workspaceId,
+  );
+  if (!root) {
+    return replayConflict("The original webhook event is no longer available.");
+  }
+  return root;
+}
+
+export function queueWebhookDeliveryReplay(
+  workspaceId: string,
+  actorId: string,
+  webhookId: string,
+  deliveryId: string,
+): MutationResult<WebhookDeliveryReplay> {
+  requireWorkspacePermission(actorId, workspaceId, "manage_settings");
+  const now = new Date().toISOString();
+  const eventId = createId("outbox");
+  const replayDeliveryId = createId("delivery");
+
+  const data = transaction((database) => {
+    const source = getReplayDelivery(workspaceId, webhookId, deliveryId);
+    const root = validateReplaySource(workspaceId, source);
+    const activeReplay = database
+      .prepare(
+        `SELECT 1 AS found FROM outbox_events
+          WHERE target_webhook_id = ?
+            AND replay_of_delivery_id = ?
+            AND processed_at IS NULL
+          LIMIT 1`,
+      )
+      .get(webhookId, root.id);
+    if (activeReplay) {
+      throw new ConflictError("A replay for this delivery is already queued.");
+    }
+
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, target_webhook_id, replay_of_delivery_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      )
+      .run(
+        eventId,
+        workspaceId,
+        root.type,
+        root.aggregate_type,
+        root.aggregate_id,
+        root.payload_json,
+        now,
+        webhookId,
+        root.id,
+        now,
+      );
+    database
+      .prepare(
+        `INSERT INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, attempt, created_at
+        ) VALUES (?, ?, ?, ?, 1, ?)`,
+      )
+      .run(replayDeliveryId, webhookId, eventId, root.request_body, now);
+    const metadata = {
+      sourceDeliveryId: source.id,
+      rootDeliveryId: root.id,
+      replayDeliveryId,
+      eventId,
+    };
+    recordActivity(database, {
+      workspaceId,
+      actorId,
+      entityType: "webhook",
+      entityId: webhookId,
+      action: "delivery.replayQueued",
+      metadata,
+      createdAt: now,
+    });
+    recordAudit(database, {
+      workspaceId,
+      actorId,
+      action: "webhook.delivery.replayQueued",
+      entityType: "webhook",
+      entityId: webhookId,
+      metadata,
+      createdAt: now,
+    });
+    return {
+      deliveryId: replayDeliveryId,
+      eventId,
+      rootDeliveryId: root.id,
+      queuedAt: now,
+    };
+  });
+
+  return {
+    data,
+    eventType: "webhook.delivery.replayQueued",
+    resourceId: replayDeliveryId,
+  };
+}
+
+export function executeWebhookDeliveryAction(
+  action: string,
+  workspaceId: string,
+  actorId: string,
+  payload: unknown,
+): MutationResult<WebhookDeliveryReplay> | null {
+  if (action !== "webhook.delivery.replay") return null;
+  const parsed = z
+    .object({
+      webhookId: z.string().trim().min(1).max(160),
+      deliveryId: z.string().trim().min(1).max(160),
+    })
+    .strict()
+    .safeParse(payload);
+  if (!parsed.success) throw new DomainValidationError("Invalid webhook replay request.");
+  return queueWebhookDeliveryReplay(
+    workspaceId,
+    actorId,
+    parsed.data.webhookId,
+    parsed.data.deliveryId,
+  );
 }

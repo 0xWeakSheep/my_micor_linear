@@ -89,6 +89,19 @@ interface DeliveryRow {
   delivered_at: string | null;
 }
 
+interface ReplaySourceRow {
+  id: string;
+  webhook_id: string;
+  event_id: string;
+  request_body: string;
+  replay_of_delivery_id: string | null;
+}
+
+interface ReplaySource {
+  eventId: string;
+  requestBody: string;
+}
+
 interface TemplateDefaults {
   statusId?: string;
   priority?: number;
@@ -1027,9 +1040,6 @@ function eventRequestBody(event: OutboxRow): string {
     workspaceId: event.workspace_id,
     resource: { type: event.aggregate_type, id: event.aggregate_id },
     data: safeJsonObject(event.payload_json),
-    ...(event.replay_of_delivery_id
-      ? { replayOfDeliveryId: event.replay_of_delivery_id }
-      : {}),
   });
 }
 
@@ -1060,6 +1070,40 @@ function firstRequestBody(
     )
     .get(webhookId, eventId) as { body: string } | undefined;
   return row?.body;
+}
+
+function resolveReplaySource(
+  database: Database,
+  webhookId: string,
+  deliveryId: string,
+): ReplaySource | undefined {
+  const visited = new Set<string>();
+  let currentDeliveryId = deliveryId;
+
+  for (let depth = 0; depth < 100; depth += 1) {
+    if (visited.has(currentDeliveryId)) return undefined;
+    visited.add(currentDeliveryId);
+
+    const delivery = database
+      .prepare(
+        `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
+                oe.replay_of_delivery_id
+           FROM webhook_deliveries wd
+           LEFT JOIN outbox_events oe ON oe.id = wd.event_id
+          WHERE wd.id = ?`,
+      )
+      .get(currentDeliveryId) as unknown as ReplaySourceRow | undefined;
+    if (!delivery || delivery.webhook_id !== webhookId) return undefined;
+    if (!delivery.replay_of_delivery_id) {
+      return {
+        eventId: delivery.event_id,
+        requestBody: delivery.request_body,
+      };
+    }
+    currentDeliveryId = delivery.replay_of_delivery_id;
+  }
+
+  return undefined;
 }
 
 function isTerminalDelivery(delivery: DeliveryRow, maxAttempts: number): boolean {
@@ -1116,6 +1160,38 @@ interface TargetResult {
   error?: string;
 }
 
+function recordInvalidReplay(
+  database: Database,
+  event: OutboxRow,
+  webhook: WebhookRow,
+  current: DeliveryRow | undefined,
+  now: Date,
+): TargetResult {
+  const error =
+    "PERMANENT: Replay source delivery is unavailable or belongs to a different webhook.";
+  let delivery = current;
+  if (!delivery) {
+    const deliveryId = createId("delivery");
+    database
+      .prepare(
+        `INSERT OR IGNORE INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, attempt, created_at
+        ) VALUES (?, ?, ?, '', 1, ?)`,
+      )
+      .run(deliveryId, webhook.id, event.id, now.toISOString());
+    delivery = latestDelivery(database, webhook.id, event.id);
+  }
+  if (!delivery) throw new Error("Unable to record invalid webhook replay.");
+  database
+    .prepare(
+      `UPDATE webhook_deliveries
+          SET response_status = 0, response_body = ?, next_attempt_at = NULL
+        WHERE id = ?`,
+    )
+    .run(error, delivery.id);
+  return { status: "terminal", error };
+}
+
 async function deliverWebhookTarget(
   database: Database,
   event: OutboxRow,
@@ -1140,6 +1216,19 @@ async function deliverWebhookTarget(
   if (current && isTerminalDelivery(current, options.maxAttempts)) {
     return { status: "terminal", error: current.response_body ?? "Delivery exhausted retries." };
   }
+
+  let replaySource: ReplaySource | null = null;
+  if (event.replay_of_delivery_id) {
+    const resolved = resolveReplaySource(
+      database,
+      webhook.id,
+      event.replay_of_delivery_id,
+    );
+    if (!resolved) {
+      return recordInvalidReplay(database, event, webhook, current, options.now);
+    }
+    replaySource = resolved;
+  }
   if (current?.next_attempt_at && current.next_attempt_at > options.now.toISOString()) {
     return { status: "pending", nextAttemptAt: current.next_attempt_at };
   }
@@ -1154,8 +1243,9 @@ async function deliverWebhookTarget(
     return { status: "terminal", error: "Delivery exhausted retries." };
   }
 
-  const body =
-    firstRequestBody(database, webhook.id, event.id) ?? eventRequestBody(event);
+  const body = replaySource
+    ? replaySource.requestBody
+    : firstRequestBody(database, webhook.id, event.id) ?? eventRequestBody(event);
   let delivery = reusingIncomplete ? current : undefined;
   if (!delivery) {
     const deliveryId = createId("delivery");
@@ -1172,6 +1262,10 @@ async function deliverWebhookTarget(
           WHERE webhook_id = ? AND event_id = ? AND attempt = ?`,
       )
       .get(webhook.id, event.id, attempt) as unknown as DeliveryRow;
+  } else if (delivery.request_body !== body) {
+    database
+      .prepare("UPDATE webhook_deliveries SET request_body = ? WHERE id = ?")
+      .run(body, delivery.id);
   }
 
   const recordPermanentFailure = (message: string, responseStatus = 0): TargetResult => {
@@ -1212,7 +1306,7 @@ async function deliverWebhookTarget(
       : { status: "pending", nextAttemptAt, error: message };
   }
 
-  const idempotencyKey = `${webhook.id}:${event.id}`;
+  const idempotencyKey = `${webhook.id}:${replaySource?.eventId ?? event.id}`;
   if (!webhook.signing_secret_encrypted) {
     return recordPermanentFailure(
       "Webhook signing secret is unavailable; rotate the webhook secret before delivery.",

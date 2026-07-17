@@ -12,6 +12,7 @@ import { executeIssueAction } from "@/modules/issues/service";
 import { executePlanningAction } from "@/modules/planning/service";
 import { executeWorkspaceAction } from "@/modules/workspaces/service";
 import { executeDataAction } from "@/modules/data-transfer/service";
+import { executeWebhookDeliveryAction } from "@/modules/webhooks/service";
 import {
   DomainValidationError,
   finishMutation,
@@ -286,6 +287,7 @@ export function executeAction(
     executeIssueAction(action, workspaceId, actorId, payload) ??
     executePlanningAction(action, workspaceId, actorId, payload) ??
     executeWorkspaceAction(action, workspaceId, actorId, payload) ??
+    executeWebhookDeliveryAction(action, workspaceId, actorId, payload) ??
     executeDataAction(action, workspaceId, actorId, payload) ??
     executeViewAction(action, workspaceId, actorId, payload) ??
     executeNotificationAction(action, workspaceId, actorId, payload) ??

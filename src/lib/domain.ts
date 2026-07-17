@@ -397,6 +397,13 @@ export interface WebhookDeliveryPage {
   nextCursor: string | null;
 }
 
+export interface WebhookDeliveryReplay {
+  deliveryId: Id;
+  eventId: Id;
+  rootDeliveryId: Id;
+  queuedAt: string;
+}
+
 export interface BootstrapData {
   currentUser: User;
   currentMembership: Membership;
