@@ -80,6 +80,7 @@ interface ReplayRootRow {
   webhook_id: string;
   event_id: string;
   request_body: string;
+  replay_of_delivery_id: string | null;
   type: string;
   aggregate_type: string;
   aggregate_id: string;
@@ -380,7 +381,7 @@ function validateReplaySource(
     return replayConflict("Replay the latest failed attempt for this event.");
   }
 
-  const rootDeliveryId = source.replay_of_delivery_id ?? source.id;
+  const root = resolveReplayRoot(workspaceId, source.webhook_id, source.id);
   const newerReplay = getOne<{ found: number }>(
     `SELECT 1 AS found FROM outbox_events
       WHERE target_webhook_id = ?
@@ -388,27 +389,48 @@ function validateReplaySource(
         AND rowid > ?
       LIMIT 1`,
     source.webhook_id,
-    rootDeliveryId,
+    root.id,
     source.event_sequence,
   );
   if (newerReplay) {
     return replayConflict("A newer replay already exists; use its latest failed delivery.");
   }
 
-  const root = getOne<ReplayRootRow>(
-    `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
-            oe.type, oe.aggregate_type, oe.aggregate_id, oe.payload_json
-       FROM webhook_deliveries wd
-       JOIN outbox_events oe ON oe.id = wd.event_id
-      WHERE wd.id = ? AND wd.webhook_id = ? AND oe.workspace_id = ?`,
-    rootDeliveryId,
-    source.webhook_id,
-    workspaceId,
-  );
-  if (!root) {
-    return replayConflict("The original webhook event is no longer available.");
-  }
   return root;
+}
+
+function resolveReplayRoot(
+  workspaceId: string,
+  webhookId: string,
+  deliveryId: string,
+): ReplayRootRow {
+  const visited = new Set<string>();
+  let currentDeliveryId = deliveryId;
+  for (let depth = 0; depth < 100; depth += 1) {
+    if (visited.has(currentDeliveryId)) {
+      return replayConflict("The webhook replay chain is invalid.");
+    }
+    visited.add(currentDeliveryId);
+    const row = getOne<ReplayRootRow>(
+      `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
+              oe.replay_of_delivery_id, oe.type, oe.aggregate_type,
+              oe.aggregate_id, oe.payload_json
+         FROM webhook_deliveries wd
+         JOIN webhooks w ON w.id = wd.webhook_id
+         JOIN outbox_events oe
+           ON oe.id = wd.event_id AND oe.workspace_id = w.workspace_id
+        WHERE wd.id = ? AND wd.webhook_id = ? AND w.workspace_id = ?`,
+      currentDeliveryId,
+      webhookId,
+      workspaceId,
+    );
+    if (!row) {
+      return replayConflict("The original webhook event is no longer available.");
+    }
+    if (!row.replay_of_delivery_id) return row;
+    currentDeliveryId = row.replay_of_delivery_id;
+  }
+  return replayConflict("The webhook replay chain is too deep.");
 }
 
 export function queueWebhookDeliveryReplay(

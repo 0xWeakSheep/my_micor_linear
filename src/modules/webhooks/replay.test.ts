@@ -251,7 +251,7 @@ describe("webhook delivery replay", () => {
     });
   });
 
-  it("normalizes replay-of-replay requests to the original root delivery", () => {
+  it("normalizes nested legacy replay chains to the original root delivery", () => {
     const rootBody = seedFailedRoot();
     insertOutbox({
       id: "event_first_replay",
@@ -265,12 +265,24 @@ describe("webhook delivery replay", () => {
       body: rootBody,
       createdAt: "2026-07-17T01:01:00.000Z",
     });
+    insertOutbox({
+      id: "event_nested_replay",
+      createdAt: "2026-07-17T01:02:00.000Z",
+      targetWebhookId: "hook_main",
+      replayOfDeliveryId: "delivery_first_replay",
+    });
+    insertDelivery({
+      id: "delivery_nested_replay",
+      eventId: "event_nested_replay",
+      body: rootBody,
+      createdAt: "2026-07-17T01:02:00.000Z",
+    });
 
     const result = queueWebhookDeliveryReplay(
       "ws_test",
       "usr_admin",
       "hook_main",
-      "delivery_first_replay",
+      "delivery_nested_replay",
     );
 
     expect(result.data.rootDeliveryId).toBe("delivery_root");
@@ -282,6 +294,38 @@ describe("webhook delivery replay", () => {
         )
         .get(result.data.eventId),
     ).toEqual({ rootDeliveryId: "delivery_root" });
+  });
+
+  it("rejects a cyclic replay chain without queueing an event", () => {
+    insertDelivery({ id: "delivery_cycle_a", eventId: "event_cycle_a" });
+    insertDelivery({
+      id: "delivery_cycle_b",
+      eventId: "event_cycle_b",
+      createdAt: "2026-07-17T01:01:00.000Z",
+    });
+    insertOutbox({
+      id: "event_cycle_a",
+      replayOfDeliveryId: "delivery_cycle_b",
+      targetWebhookId: "hook_main",
+    });
+    insertOutbox({
+      id: "event_cycle_b",
+      createdAt: "2026-07-17T01:01:00.000Z",
+      replayOfDeliveryId: "delivery_cycle_a",
+      targetWebhookId: "hook_main",
+    });
+
+    expect(() =>
+      queueWebhookDeliveryReplay(
+        "ws_test",
+        "usr_admin",
+        "hook_main",
+        "delivery_cycle_b",
+      ),
+    ).toThrow(ConflictError);
+    expect(getDatabase().prepare("SELECT COUNT(*) AS count FROM outbox_events").get()).toEqual({
+      count: 2,
+    });
   });
 
   it("blocks duplicates once a newer replay is queued", () => {
