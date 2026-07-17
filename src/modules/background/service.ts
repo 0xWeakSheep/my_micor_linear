@@ -67,6 +67,8 @@ interface OutboxRow {
   available_at: string;
   attempts: number;
   created_at: string;
+  target_webhook_id: string | null;
+  replay_of_delivery_id: string | null;
 }
 
 interface WebhookRow {
@@ -1025,6 +1027,9 @@ function eventRequestBody(event: OutboxRow): string {
     workspaceId: event.workspace_id,
     resource: { type: event.aggregate_type, id: event.aggregate_id },
     data: safeJsonObject(event.payload_json),
+    ...(event.replay_of_delivery_id
+      ? { replayOfDeliveryId: event.replay_of_delivery_id }
+      : {}),
   });
 }
 
@@ -1338,14 +1343,18 @@ async function processOutboxEvent(
   retryScheduled: number;
   terminalFailures: number;
 }> {
-  const hooks = event.workspace_id
-    ? (database
-        .prepare("SELECT * FROM webhooks WHERE workspace_id = ? AND is_active = 1 ORDER BY id")
-        .all(event.workspace_id) as unknown as WebhookRow[]).filter((webhook) => {
-        const events = parseWebhookEvents(webhook.events_json);
-        return events.includes("*") || events.includes(event.type);
-      })
-    : [];
+  const hooks = !event.workspace_id
+    ? []
+    : event.target_webhook_id
+      ? (database
+          .prepare("SELECT * FROM webhooks WHERE id = ? AND workspace_id = ?")
+          .all(event.target_webhook_id, event.workspace_id) as unknown as WebhookRow[])
+      : (database
+          .prepare("SELECT * FROM webhooks WHERE workspace_id = ? AND is_active = 1 ORDER BY id")
+          .all(event.workspace_id) as unknown as WebhookRow[]).filter((webhook) => {
+          const events = parseWebhookEvents(webhook.events_json);
+          return events.includes("*") || events.includes(event.type);
+        });
   const outcomes: TargetResult[] = [];
   for (const webhook of hooks) {
     outcomes.push(await deliverWebhookTarget(database, event, webhook, options));

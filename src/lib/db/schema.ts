@@ -678,4 +678,16 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE webhooks ADD COLUMN signing_secret_encrypted TEXT;
     `,
   },
+  {
+    version: 5,
+    name: "webhook_delivery_operations",
+    sql: String.raw`
+      ALTER TABLE outbox_events
+        ADD COLUMN target_webhook_id TEXT REFERENCES webhooks(id) ON DELETE CASCADE;
+      ALTER TABLE outbox_events
+        ADD COLUMN replay_of_delivery_id TEXT REFERENCES webhook_deliveries(id) ON DELETE SET NULL;
+      CREATE INDEX outbox_target_webhook_idx
+        ON outbox_events(target_webhook_id, processed_at, available_at);
+    `,
+  },
 ] as const;

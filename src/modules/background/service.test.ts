@@ -329,6 +329,66 @@ describe("webhook URL safety", () => {
 });
 
 describe("outbox webhook delivery", () => {
+  it("delivers a targeted event only to the requested webhook", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    const insertWebhook = database.prepare(
+      `INSERT INTO webhooks(
+        id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+        events_json, is_active, created_by_id, created_at, updated_at
+      ) VALUES (?, 'workspace_1', ?, ?, 'key', ?, ?, ?, 'user_1', ?, ?)`,
+    );
+    insertWebhook.run(
+      "webhook_target",
+      "Disabled target",
+      "https://target.example.com/hook",
+      sealWebhookSecret("target-secret"),
+      '["project.created"]',
+      0,
+      CREATED_AT,
+      CREATED_AT,
+    );
+    insertWebhook.run(
+      "webhook_other",
+      "Active other hook",
+      "https://other.example.com/hook",
+      sealWebhookSecret("other-secret"),
+      '["issue.created"]',
+      1,
+      CREATED_AT,
+      CREATED_AT,
+    );
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, target_webhook_id, created_at
+        ) VALUES (
+          'event_targeted', 'workspace_1', 'issue.created', 'issue', 'issue_1', '{}',
+          ?, 0, 'webhook_target', ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+
+    const requestedUrls: string[] = [];
+    const result = await deliverOutboxWebhooks(database, {
+      now: new Date(CREATED_AT),
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImplementation: async (input) => {
+        requestedUrls.push(String(input));
+        return new Response("accepted", { status: 202 });
+      },
+    });
+
+    expect(result).toMatchObject({ processedEvents: 1, delivered: 1 });
+    expect(requestedUrls).toEqual(["https://target.example.com/hook"]);
+    expect(
+      database
+        .prepare("SELECT webhook_id AS webhookId FROM webhook_deliveries")
+        .all(),
+    ).toEqual([{ webhookId: "webhook_target" }]);
+  });
+
   it("retries transient failures with a stable idempotency key and stops after success", async () => {
     const database = createTestDatabase();
     seedWorkspace(database);
