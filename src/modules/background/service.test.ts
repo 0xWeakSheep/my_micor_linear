@@ -488,7 +488,7 @@ describe("outbox webhook delivery", () => {
       expect(headers.get("x-orbit-signature")).toBe(headers.get("x-micro-linear-signature"));
       requestBodies.push(String(init?.body ?? ""));
       return requests === 1
-        ? new Response("temporary", { status: 503 })
+        ? new Response("PERMANENT: temporary upstream overload", { status: 503 })
         : new Response("accepted", { status: 202 });
     };
     const resolveHost = async () => [{ address: "93.184.216.34", family: 4 }];

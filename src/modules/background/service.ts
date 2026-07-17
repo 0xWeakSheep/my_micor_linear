@@ -1064,7 +1064,8 @@ function firstRequestBody(
 
 function isTerminalDelivery(delivery: DeliveryRow, maxAttempts: number): boolean {
   return (
-    delivery.response_body?.startsWith("PERMANENT: ") === true ||
+    (delivery.next_attempt_at === null &&
+      delivery.response_body?.startsWith("PERMANENT: ") === true) ||
     (delivery.attempt >= maxAttempts && delivery.next_attempt_at === null)
   );
 }
