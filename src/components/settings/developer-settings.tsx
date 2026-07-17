@@ -121,14 +121,33 @@ function WebhookRow({ webhook }: { webhook: Webhook }) {
   const [draft, setDraft] = useState({ name: webhook.name, url: webhook.url, events: webhook.events, isActive: webhook.isActive });
   const [saving, setSaving] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const draftUrlIsValid = Boolean(draft.url.trim()) && isValidWebhookEndpoint(draft.url.trim());
+  const canSave = Boolean(draft.name.trim()) && draftUrlIsValid && draft.events.length > 0;
+  function startEditing() {
+    setDraft({
+      name: webhook.name,
+      url: webhook.url,
+      events: webhook.events,
+      isActive: webhook.isActive,
+    });
+    setEditing(true);
+  }
   async function save() {
+    if (!canSave) return;
     setSaving(true);
-    const result = await mutate("webhook.update", { webhookId: webhook.id, changes: draft }, { successMessage: "Webhook 已更新" });
+    const result = await mutate(
+      "webhook.update",
+      {
+        webhookId: webhook.id,
+        changes: { ...draft, name: draft.name.trim(), url: draft.url.trim() },
+      },
+      { successMessage: "Webhook 已更新" },
+    );
     setSaving(false);
     if (result) setEditing(false);
   }
   async function remove() {
-    if (!window.confirm(`删除 Webhook“${webhook.name}”？`)) return;
+    if (!window.confirm(`删除 Webhook“${webhook.name}”？相关投递记录也会永久删除。`)) return;
     setSaving(true);
     await mutate("webhook.delete", { webhookId: webhook.id }, { successMessage: "Webhook 已删除" });
     setSaving(false);
@@ -147,11 +166,11 @@ function WebhookRow({ webhook }: { webhook: Webhook }) {
   if (editing) {
     return (
       <div className="space-y-3 bg-surface-subtle p-4 sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></Field><Field label="URL"><NativeInput type="url" value={draft.url} onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} /></Field></div>
-        <EventPicker events={draft.events} onChange={(events) => setDraft((current) => ({ ...current, events }))} />
-        <label className="flex items-center gap-2 text-xs text-secondary"><input type="checkbox" checked={draft.isActive} disabled={!webhook.signingReady} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} className="size-4 accent-[var(--accent)]" />启用 Webhook</label>
+        <div className="grid gap-3 sm:grid-cols-2"><Field label="名称"><NativeInput value={draft.name} disabled={saving} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></Field><Field label="URL"><NativeInput type="url" value={draft.url} disabled={saving} aria-invalid={!draftUrlIsValid} onChange={(event) => setDraft((current) => ({ ...current, url: event.target.value }))} />{!draftUrlIsValid ? <p className="mt-1 text-xs text-danger">请输入不含凭据和片段的 HTTPS 地址。</p> : null}</Field></div>
+        <EventPicker events={draft.events} disabled={saving} onChange={(events) => setDraft((current) => ({ ...current, events }))} />
+        <label className="flex items-center gap-2 text-xs text-secondary"><input type="checkbox" checked={draft.isActive} disabled={saving || !webhook.signingReady} onChange={(event) => setDraft((current) => ({ ...current, isActive: event.target.checked }))} className="size-4 accent-[var(--accent)]" />启用 Webhook</label>
         {!webhook.signingReady ? <p className="text-xs text-warning">请先轮换签名密钥，再启用此 Webhook。</p> : null}
-        <div className="flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => setEditing(false)}>取消</Button><Button variant="primary" size="sm" loading={saving} onClick={() => void save()}>保存</Button></div>
+        <div className="flex justify-end gap-2"><Button variant="ghost" size="sm" disabled={saving} onClick={() => setEditing(false)}>取消</Button><Button variant="primary" size="sm" loading={saving} disabled={!canSave} onClick={() => void save()}>保存</Button></div>
       </div>
     );
   }
@@ -159,15 +178,15 @@ function WebhookRow({ webhook }: { webhook: Webhook }) {
     <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
       <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle text-tertiary"><WebhookIcon size={14} /></span>
       <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-medium">{webhook.name}</p><Badge variant={!webhook.signingReady ? "warning" : webhook.isActive ? "success" : "neutral"} size="xs">{!webhook.signingReady ? "需配置密钥" : webhook.isActive ? "启用" : "停用"}</Badge></div><p className="truncate text-xs text-tertiary">{webhook.url} · {webhook.events.length} 个事件</p></div>
-      <div className="ml-auto flex items-center gap-1"><Button variant="ghost" size="sm" loading={saving} onClick={() => void rotateSecret()}>{webhook.signingReady ? "轮换密钥" : "配置密钥"}</Button><Button variant="ghost" size="sm" onClick={() => setEditing(true)}>编辑</Button><IconButton label={`删除 ${webhook.name}`} icon={<Trash2 size={13} />} variant="ghost" size="icon-sm" className="hover:text-danger" disabled={saving} onClick={() => void remove()} /></div>
+      <div className="ml-auto flex items-center gap-1"><Button variant="ghost" size="sm" loading={saving} onClick={() => void rotateSecret()}>{webhook.signingReady ? "轮换密钥" : "配置密钥"}</Button><Button variant="ghost" size="sm" disabled={saving} onClick={startEditing}>编辑</Button><IconButton label={`删除 ${webhook.name}`} icon={<Trash2 size={13} />} variant="ghost" size="icon-sm" className="hover:text-danger" disabled={saving} onClick={() => void remove()} /></div>
       {revealedSecret ? <div className="basis-full rounded-md border border-warning/30 bg-[var(--warning-soft)] p-2 text-[11px]"><p className="font-medium text-warning">新签名密钥只显示一次</p><div className="mt-1 flex items-center gap-2"><code className="min-w-0 flex-1 overflow-x-auto">{revealedSecret}</code><IconButton label="复制新签名密钥" icon={<Clipboard size={13} />} size="icon-sm" onClick={() => void navigator.clipboard.writeText(revealedSecret)} /></div></div> : null}
     </div>
   );
 }
 
-function EventPicker({ events, onChange }: { events: string[]; onChange: (events: string[]) => void }) {
+function EventPicker({ events, onChange, disabled = false }: { events: string[]; onChange: (events: string[]) => void; disabled?: boolean }) {
   return (
-    <fieldset><legend className="text-[11px] font-medium text-secondary">订阅事件</legend><div className="mt-1.5 flex flex-wrap gap-2">{WEBHOOK_EVENTS.map((eventName) => { const checked = events.includes(eventName); return <label key={eventName} className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-secondary hover:border-border-strong"><input type="checkbox" checked={checked} onChange={() => onChange(checked ? events.filter((value) => value !== eventName) : [...events, eventName])} className="size-3.5 accent-[var(--accent)]" />{eventName}</label>; })}</div></fieldset>
+    <fieldset disabled={disabled}><legend className="text-[11px] font-medium text-secondary">订阅事件</legend><div className="mt-1.5 flex flex-wrap gap-2">{WEBHOOK_EVENTS.map((eventName) => { const checked = events.includes(eventName); return <label key={eventName} className={`flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[10px] text-secondary ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-border-strong"}`}><input type="checkbox" checked={checked} onChange={() => onChange(checked ? events.filter((value) => value !== eventName) : [...events, eventName])} className="size-3.5 accent-[var(--accent)]" />{eventName}</label>; })}</div></fieldset>
   );
 }
 
