@@ -449,10 +449,20 @@ describe("outbox webhook delivery", () => {
         )`,
       )
       .run(CREATED_AT, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, attempt, created_at
+        ) VALUES (
+          'delivery_replay', 'webhook_target', 'event_replay', ?, 1, ?
+        )`,
+      )
+      .run(originalBody, CREATED_AT);
 
     const requests: Array<{ url: string; body: string; headers: Headers }> = [];
     const result = await deliverOutboxWebhooks(database, {
       now: new Date(CREATED_AT),
+      maxAttempts: 1,
       resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
       fetchImplementation: async (input, init) => {
         requests.push({

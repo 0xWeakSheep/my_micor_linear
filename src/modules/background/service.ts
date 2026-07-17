@@ -1107,6 +1107,7 @@ function resolveReplaySource(
 }
 
 function isTerminalDelivery(delivery: DeliveryRow, maxAttempts: number): boolean {
+  if (delivery.response_status === null && delivery.response_body === null) return false;
   return (
     (delivery.next_attempt_at === null &&
       delivery.response_body?.startsWith("PERMANENT: ") === true) ||
