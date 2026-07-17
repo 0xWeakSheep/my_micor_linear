@@ -690,4 +690,17 @@ export const migrations: readonly Migration[] = [
         ON outbox_events(target_webhook_id, processed_at, available_at);
     `,
   },
+  {
+    version: 6,
+    name: "webhook_replay_constraints",
+    sql: String.raw`
+      CREATE UNIQUE INDEX outbox_active_webhook_replay_idx
+        ON outbox_events(target_webhook_id, replay_of_delivery_id)
+        WHERE target_webhook_id IS NOT NULL
+          AND replay_of_delivery_id IS NOT NULL
+          AND processed_at IS NULL;
+      CREATE INDEX webhook_delivery_history_idx
+        ON webhook_deliveries(webhook_id, created_at DESC, id DESC);
+    `,
+  },
 ] as const;
