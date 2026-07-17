@@ -1347,7 +1347,9 @@ async function processOutboxEvent(
     ? []
     : event.target_webhook_id
       ? (database
-          .prepare("SELECT * FROM webhooks WHERE id = ? AND workspace_id = ?")
+          .prepare(
+            "SELECT * FROM webhooks WHERE id = ? AND workspace_id = ? AND is_active = 1",
+          )
           .all(event.target_webhook_id, event.workspace_id) as unknown as WebhookRow[])
       : (database
           .prepare("SELECT * FROM webhooks WHERE workspace_id = ? AND is_active = 1 ORDER BY id")
@@ -1356,6 +1358,17 @@ async function processOutboxEvent(
           return events.includes("*") || events.includes(event.type);
         });
   const outcomes: TargetResult[] = [];
+  if (event.target_webhook_id && hooks.length === 0) {
+    const error = "PERMANENT: Webhook is inactive or unavailable.";
+    database
+      .prepare(
+        `UPDATE webhook_deliveries
+            SET response_status = 0, response_body = ?, next_attempt_at = NULL
+          WHERE webhook_id = ? AND event_id = ? AND delivered_at IS NULL`,
+      )
+      .run(error, event.target_webhook_id, event.id);
+    outcomes.push({ status: "terminal", error });
+  }
   for (const webhook of hooks) {
     outcomes.push(await deliverWebhookTarget(database, event, webhook, options));
   }

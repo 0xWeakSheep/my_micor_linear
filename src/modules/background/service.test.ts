@@ -329,7 +329,7 @@ describe("webhook URL safety", () => {
 });
 
 describe("outbox webhook delivery", () => {
-  it("delivers a targeted event only to the requested webhook", async () => {
+  it("delivers a targeted event only to the requested active webhook", async () => {
     const database = createTestDatabase();
     seedWorkspace(database);
     const insertWebhook = database.prepare(
@@ -340,11 +340,11 @@ describe("outbox webhook delivery", () => {
     );
     insertWebhook.run(
       "webhook_target",
-      "Disabled target",
+      "Explicit target",
       "https://target.example.com/hook",
       sealWebhookSecret("target-secret"),
       '["project.created"]',
-      0,
+      1,
       CREATED_AT,
       CREATED_AT,
     );
@@ -387,6 +387,65 @@ describe("outbox webhook delivery", () => {
         .prepare("SELECT webhook_id AS webhookId FROM webhook_deliveries")
         .all(),
     ).toEqual([{ webhookId: "webhook_target" }]);
+  });
+
+  it("cancels a targeted delivery when its webhook is inactive", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    database
+      .prepare(
+        `INSERT INTO webhooks(
+          id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+          events_json, is_active, created_by_id, created_at, updated_at
+        ) VALUES (
+          'webhook_disabled', 'workspace_1', 'Disabled hook',
+          'https://disabled.example.com/hook', 'key', ?, '["issue.created"]', 0,
+          'user_1', ?, ?
+        )`,
+      )
+      .run(sealWebhookSecret("disabled-secret"), CREATED_AT, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, target_webhook_id, created_at
+        ) VALUES (
+          'event_disabled', 'workspace_1', 'issue.created', 'issue', 'issue_1', '{}',
+          ?, 0, 'webhook_disabled', ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO webhook_deliveries(
+          id, webhook_id, event_id, request_body, attempt, created_at
+        ) VALUES (
+          'delivery_disabled', 'webhook_disabled', 'event_disabled', '{}', 1, ?
+        )`,
+      )
+      .run(CREATED_AT);
+    const fetchImplementation = vi.fn<typeof fetch>();
+
+    const result = await deliverOutboxWebhooks(database, {
+      now: new Date(CREATED_AT),
+      fetchImplementation,
+    });
+
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ processedEvents: 1, terminalFailures: 1 });
+    expect(
+      database
+        .prepare(
+          `SELECT response_status AS responseStatus, response_body AS responseBody,
+                  next_attempt_at AS nextAttemptAt
+             FROM webhook_deliveries WHERE id = 'delivery_disabled'`,
+        )
+        .get(),
+    ).toEqual({
+      responseStatus: 0,
+      responseBody: "PERMANENT: Webhook is inactive or unavailable.",
+      nextAttemptAt: null,
+    });
   });
 
   it("retries transient failures with a stable idempotency key and stops after success", async () => {
