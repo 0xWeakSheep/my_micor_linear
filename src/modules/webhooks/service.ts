@@ -193,7 +193,9 @@ function encodeCursor(
 
 function deliveryStatus(row: DeliveryHistoryRow): WebhookDeliveryStatus {
   if (row.delivered_at) return "delivered";
-  if (row.next_attempt_at) return "retrying";
+  if (row.next_attempt_at) {
+    return row.latest_attempt && !row.event_processed_at ? "retrying" : "failed";
+  }
   if (row.response_status !== null || row.response_excerpt !== null) return "failed";
   return "queued";
 }
@@ -228,7 +230,7 @@ function toDelivery(row: DeliveryHistoryRow): WebhookDeliverySummary {
       status === "failed" || status === "retrying" ? row.response_excerpt : null,
     createdAt: row.created_at,
     deliveredAt: row.delivered_at,
-    nextAttemptAt: row.next_attempt_at,
+    nextAttemptAt: status === "retrying" ? row.next_attempt_at : null,
     replayOfDeliveryId: row.replay_of_delivery_id,
     canReplay: replayBlockedReason === null,
     replayBlockedReason,
@@ -288,14 +290,12 @@ export function listWebhookDeliveries(
                WHERE newer_replay.target_webhook_id = wd.webhook_id
                  AND newer_replay.replay_of_delivery_id =
                    COALESCE(oe.replay_of_delivery_id, wd.id)
-                 AND (
-                   newer_replay.created_at > oe.created_at OR
-                   (newer_replay.created_at = oe.created_at AND newer_replay.rowid > oe.rowid)
-                 )
+                 AND newer_replay.rowid > oe.rowid
             ) THEN 1 ELSE 0 END AS has_newer_replay
        FROM webhook_deliveries wd
        JOIN webhooks w ON w.id = wd.webhook_id
-       LEFT JOIN outbox_events oe ON oe.id = wd.event_id
+       LEFT JOIN outbox_events oe
+         ON oe.id = wd.event_id AND oe.workspace_id = w.workspace_id
       WHERE wd.webhook_id = ?
         ${cursorClause}
       ORDER BY wd.created_at DESC, wd.id DESC

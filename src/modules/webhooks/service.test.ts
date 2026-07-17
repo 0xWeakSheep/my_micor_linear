@@ -46,9 +46,11 @@ function resetFixture(): void {
   database
     .prepare(
       `INSERT INTO workspaces(id, name, slug, icon, timezone, created_at, updated_at)
-       VALUES ('ws_test', 'Test', 'test', 'T', 'UTC', ?, ?)` ,
+       VALUES
+         ('ws_test', 'Test', 'test', 'T', 'UTC', ?, ?),
+         ('ws_other', 'Other', 'other', 'O', 'UTC', ?, ?)` ,
     )
-    .run(at(0), at(0));
+    .run(at(0), at(0), at(0), at(0));
   database
     .prepare(
       `INSERT INTO workspace_members(id, workspace_id, user_id, role, status, joined_at)
@@ -233,6 +235,110 @@ describe("webhook delivery history", () => {
         new URLSearchParams(`cursor=${first.nextCursor}`),
       ),
     ).toThrow(DomainValidationError);
+  });
+
+  it("uses the id tie-breaker when deliveries share a timestamp", () => {
+    for (const suffix of ["a", "b", "c"]) {
+      insertEvent({ id: `event_tie_${suffix}`, createdAt: at(1) });
+      insertDelivery({
+        id: `delivery_tie_${suffix}`,
+        eventId: `event_tie_${suffix}`,
+        createdAt: at(1),
+        responseStatus: 400,
+        responseBody: "failed",
+      });
+    }
+
+    const first = listWebhookDeliveries(
+      "usr_admin",
+      "test",
+      "hook_main",
+      new URLSearchParams("limit=2"),
+    );
+    const second = listWebhookDeliveries(
+      "usr_admin",
+      "test",
+      "hook_main",
+      new URLSearchParams(`limit=2&cursor=${first.nextCursor}`),
+    );
+
+    expect(first.items.map((item) => item.id)).toEqual([
+      "delivery_tie_c",
+      "delivery_tie_b",
+    ]);
+    expect(second.items.map((item) => item.id)).toEqual(["delivery_tie_a"]);
+  });
+
+  it("marks superseded retry attempts as failed instead of retrying forever", () => {
+    insertEvent({ id: "event_retried", createdAt: at(1) });
+    insertDelivery({
+      id: "delivery_attempt_1",
+      eventId: "event_retried",
+      createdAt: at(1),
+      responseStatus: 503,
+      responseBody: "temporary failure",
+      nextAttemptAt: at(30),
+    });
+    insertDelivery({
+      id: "delivery_attempt_2",
+      eventId: "event_retried",
+      createdAt: at(2),
+      attempt: 2,
+      responseStatus: 200,
+      responseBody: "ok",
+      deliveredAt: at(2),
+    });
+
+    const items = listWebhookDeliveries(
+      "usr_admin",
+      "test",
+      "hook_main",
+      new URLSearchParams(),
+    ).items;
+    expect(items.find((item) => item.id === "delivery_attempt_2")).toMatchObject({
+      status: "delivered",
+    });
+    expect(items.find((item) => item.id === "delivery_attempt_1")).toMatchObject({
+      status: "failed",
+      nextAttemptAt: null,
+      canReplay: false,
+      replayBlockedReason: "newer_delivery_exists",
+    });
+  });
+
+  it("does not join event metadata from another workspace", () => {
+    getDatabase()
+      .prepare(
+        `INSERT INTO outbox_events(
+           id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+           available_at, attempts, processed_at, created_at
+         ) VALUES (
+           'event_foreign', 'ws_other', 'private.event', 'secret', 'secret_1', '{}',
+           ?, 1, ?, ?
+         )`,
+      )
+      .run(at(1), at(1), at(1));
+    insertDelivery({
+      id: "delivery_corrupt_reference",
+      eventId: "event_foreign",
+      createdAt: at(1),
+      responseStatus: 400,
+      responseBody: "failed",
+    });
+
+    const delivery = listWebhookDeliveries(
+      "usr_admin",
+      "test",
+      "hook_main",
+      new URLSearchParams(),
+    ).items[0];
+    expect(delivery).toMatchObject({
+      eventType: "unknown",
+      resourceType: null,
+      resourceId: null,
+      canReplay: false,
+      replayBlockedReason: "event_unavailable",
+    });
   });
 
   it("allows replay only from the newest failed event in a replay chain", () => {
