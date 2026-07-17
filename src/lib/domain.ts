@@ -400,6 +400,7 @@ export interface WebhookDeliveryPage {
 export interface WebhookDeliveryReplay {
   deliveryId: Id;
   eventId: Id;
+  originalEventId: Id;
   rootDeliveryId: Id;
   queuedAt: string;
 }

@@ -703,4 +703,55 @@ export const migrations: readonly Migration[] = [
         ON webhook_deliveries(webhook_id, created_at DESC, id DESC);
     `,
   },
+  {
+    version: 7,
+    name: "webhook_replay_identity",
+    sql: String.raw`
+      ALTER TABLE outbox_events ADD COLUMN replay_original_event_id TEXT;
+      WITH RECURSIVE replay_chain(
+        replay_event_id, delivery_id, original_event_id,
+        next_delivery_id, depth, path
+      ) AS (
+        SELECT replay.id, source_delivery.id, source_delivery.event_id,
+               source_event.replay_of_delivery_id, 0,
+               ',' || source_delivery.id || ','
+          FROM outbox_events replay
+          JOIN webhook_deliveries source_delivery
+            ON source_delivery.id = replay.replay_of_delivery_id
+          LEFT JOIN outbox_events source_event
+            ON source_event.id = source_delivery.event_id
+         WHERE replay.replay_of_delivery_id IS NOT NULL
+        UNION ALL
+        SELECT chain.replay_event_id, source_delivery.id, source_delivery.event_id,
+               source_event.replay_of_delivery_id, chain.depth + 1,
+               chain.path || source_delivery.id || ','
+          FROM replay_chain chain
+          JOIN webhook_deliveries source_delivery
+            ON source_delivery.id = chain.next_delivery_id
+          LEFT JOIN outbox_events source_event
+            ON source_event.id = source_delivery.event_id
+         WHERE chain.next_delivery_id IS NOT NULL
+           AND chain.depth < 99
+           AND instr(chain.path, ',' || source_delivery.id || ',') = 0
+      ), replay_roots AS (
+        SELECT replay_event_id, original_event_id
+          FROM replay_chain
+         WHERE next_delivery_id IS NULL
+      )
+      UPDATE outbox_events
+         SET replay_original_event_id = (
+           SELECT root.original_event_id
+             FROM replay_roots root
+            WHERE root.replay_event_id = outbox_events.id
+            ORDER BY root.original_event_id
+            LIMIT 1
+         )
+       WHERE replay_of_delivery_id IS NOT NULL;
+      CREATE UNIQUE INDEX outbox_active_webhook_replay_identity_idx
+        ON outbox_events(target_webhook_id, replay_original_event_id)
+        WHERE target_webhook_id IS NOT NULL
+          AND replay_original_event_id IS NOT NULL
+          AND processed_at IS NULL;
+    `,
+  },
 ] as const;

@@ -184,6 +184,7 @@ describe("webhook delivery replay", () => {
     expect(replay).toMatchObject({
       deliveryId: expect.stringMatching(/^delivery_/),
       eventId: expect.stringMatching(/^outbox_/),
+      originalEventId: "event_root",
       rootDeliveryId: "delivery_root",
     });
   });
@@ -201,7 +202,7 @@ describe("webhook delivery replay", () => {
     expect(result).toMatchObject({
       eventType: "webhook.delivery.replayQueued",
       resourceId: result.data.deliveryId,
-      data: { rootDeliveryId: "delivery_root" },
+      data: { originalEventId: "event_root", rootDeliveryId: "delivery_root" },
     });
     expect(
       getDatabase()
@@ -210,7 +211,8 @@ describe("webhook delivery replay", () => {
                   aggregate_id AS aggregateId, payload_json AS payloadJson,
                   attempts, processed_at AS processedAt,
                   target_webhook_id AS targetWebhookId,
-                  replay_of_delivery_id AS replayOfDeliveryId
+                  replay_of_delivery_id AS replayOfDeliveryId,
+                  replay_original_event_id AS originalEventId
              FROM outbox_events WHERE id = ?`,
         )
         .get(result.data.eventId),
@@ -224,6 +226,7 @@ describe("webhook delivery replay", () => {
       processedAt: null,
       targetWebhookId: "hook_main",
       replayOfDeliveryId: "delivery_root",
+      originalEventId: "event_root",
     });
     expect(
       getDatabase()
@@ -286,6 +289,7 @@ describe("webhook delivery replay", () => {
     );
 
     expect(result.data.rootDeliveryId).toBe("delivery_root");
+    expect(result.data.originalEventId).toBe("event_root");
     expect(
       getDatabase()
         .prepare(

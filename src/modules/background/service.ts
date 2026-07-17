@@ -69,6 +69,7 @@ interface OutboxRow {
   created_at: string;
   target_webhook_id: string | null;
   replay_of_delivery_id: string | null;
+  replay_original_event_id: string | null;
 }
 
 interface WebhookRow {
@@ -95,6 +96,8 @@ interface ReplaySourceRow {
   event_id: string;
   request_body: string;
   replay_of_delivery_id: string | null;
+  replay_original_event_id: string | null;
+  outbox_id: string | null;
 }
 
 interface ReplaySource {
@@ -1076,8 +1079,10 @@ function resolveReplaySource(
   database: Database,
   webhookId: string,
   deliveryId: string,
+  expectedOriginalEventId: string | null,
 ): ReplaySource | undefined {
   const visited = new Set<string>();
+  let originalEventId = expectedOriginalEventId;
   let currentDeliveryId = deliveryId;
 
   for (let depth = 0; depth < 100; depth += 1) {
@@ -1087,16 +1092,26 @@ function resolveReplaySource(
     const delivery = database
       .prepare(
         `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
-                oe.replay_of_delivery_id
+                oe.id AS outbox_id, oe.replay_of_delivery_id,
+                oe.replay_original_event_id
            FROM webhook_deliveries wd
-           LEFT JOIN outbox_events oe ON oe.id = wd.event_id
+           JOIN webhooks w ON w.id = wd.webhook_id
+           LEFT JOIN outbox_events oe
+             ON oe.id = wd.event_id AND oe.workspace_id = w.workspace_id
           WHERE wd.id = ?`,
       )
       .get(currentDeliveryId) as unknown as ReplaySourceRow | undefined;
     if (!delivery || delivery.webhook_id !== webhookId) return undefined;
+    if (delivery.replay_original_event_id) {
+      if (originalEventId && originalEventId !== delivery.replay_original_event_id) {
+        return undefined;
+      }
+      originalEventId = delivery.replay_original_event_id;
+    }
     if (!delivery.replay_of_delivery_id) {
+      if (!delivery.outbox_id && !originalEventId) return undefined;
       return {
-        eventId: delivery.event_id,
+        eventId: originalEventId ?? delivery.event_id,
         requestBody: delivery.request_body,
       };
     }
@@ -1219,12 +1234,20 @@ async function deliverWebhookTarget(
   }
 
   let replaySource: ReplaySource | null = null;
-  if (event.replay_of_delivery_id) {
-    const resolved = resolveReplaySource(
-      database,
-      webhook.id,
-      event.replay_of_delivery_id,
-    );
+  if (event.replay_of_delivery_id || event.replay_original_event_id) {
+    const resolved = event.replay_of_delivery_id
+      ? resolveReplaySource(
+          database,
+          webhook.id,
+          event.replay_of_delivery_id,
+          event.replay_original_event_id,
+        )
+      : current && event.replay_original_event_id
+        ? {
+            eventId: event.replay_original_event_id,
+            requestBody: current.request_body,
+          }
+        : undefined;
     if (!resolved) {
       return recordInvalidReplay(database, event, webhook, current, options.now);
     }

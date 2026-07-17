@@ -50,6 +50,7 @@ interface DeliveryHistoryRow {
   delivered_at: string | null;
   created_at: string;
   replay_of_delivery_id: string | null;
+  replay_original_event_id: string | null;
   event_processed_at: string | null;
   event_available: number;
   webhook_active: number;
@@ -69,6 +70,7 @@ interface ReplayDeliveryRow {
   next_attempt_at: string | null;
   delivered_at: string | null;
   replay_of_delivery_id: string | null;
+  replay_original_event_id: string | null;
   event_processed_at: string | null;
   event_sequence: number | null;
   webhook_active: number;
@@ -81,11 +83,14 @@ interface ReplayRootRow {
   event_id: string;
   request_body: string;
   replay_of_delivery_id: string | null;
+  replay_original_event_id: string | null;
   type: string;
   aggregate_type: string;
   aggregate_id: string;
   payload_json: string;
 }
+
+type ResolvedReplayRoot = ReplayRootRow & { originalEventId: string };
 
 function invalidPagination(message: string): never {
   throw new DomainValidationError(message);
@@ -276,7 +281,8 @@ export function listWebhookDeliveries(
             wd.attempt, wd.next_attempt_at, wd.delivered_at, wd.created_at,
             oe.type AS event_type, oe.aggregate_type AS resource_type,
             oe.aggregate_id AS resource_id,
-            oe.replay_of_delivery_id, oe.processed_at AS event_processed_at,
+            oe.replay_of_delivery_id, oe.replay_original_event_id,
+            oe.processed_at AS event_processed_at,
             CASE WHEN oe.id IS NULL THEN 0 ELSE 1 END AS event_available,
             w.is_active AS webhook_active,
             CASE WHEN w.signing_secret_encrypted IS NULL THEN 0 ELSE 1 END AS signing_ready,
@@ -289,8 +295,15 @@ export function listWebhookDeliveries(
             CASE WHEN oe.id IS NOT NULL AND EXISTS (
               SELECT 1 FROM outbox_events newer_replay
                WHERE newer_replay.target_webhook_id = wd.webhook_id
-                 AND newer_replay.replay_of_delivery_id =
-                   COALESCE(oe.replay_of_delivery_id, wd.id)
+                 AND (
+                   newer_replay.replay_original_event_id =
+                     COALESCE(oe.replay_original_event_id, oe.id) OR
+                   (
+                     newer_replay.replay_original_event_id IS NULL AND
+                     newer_replay.replay_of_delivery_id =
+                       COALESCE(oe.replay_of_delivery_id, wd.id)
+                   )
+                 )
                  AND newer_replay.rowid > oe.rowid
             ) THEN 1 ELSE 0 END AS has_newer_replay
        FROM webhook_deliveries wd
@@ -329,12 +342,14 @@ function getReplayDelivery(
     `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
             wd.response_status, wd.response_body, wd.attempt,
             wd.next_attempt_at, wd.delivered_at,
-            oe.replay_of_delivery_id, oe.processed_at AS event_processed_at,
+            oe.replay_of_delivery_id, oe.replay_original_event_id,
+            oe.processed_at AS event_processed_at,
             oe.rowid AS event_sequence, w.is_active AS webhook_active,
             w.signing_secret_encrypted
        FROM webhook_deliveries wd
        JOIN webhooks w ON w.id = wd.webhook_id
-       LEFT JOIN outbox_events oe ON oe.id = wd.event_id
+       LEFT JOIN outbox_events oe
+         ON oe.id = wd.event_id AND oe.workspace_id = w.workspace_id
       WHERE wd.id = ? AND wd.webhook_id = ? AND w.workspace_id = ?`,
     deliveryId,
     webhookId,
@@ -347,7 +362,7 @@ function getReplayDelivery(
 function validateReplaySource(
   workspaceId: string,
   source: ReplayDeliveryRow,
-): ReplayRootRow {
+): ResolvedReplayRoot {
   if (source.delivered_at || source.next_attempt_at) {
     return replayConflict("Only a final failed webhook delivery can be replayed.");
   }
@@ -385,10 +400,14 @@ function validateReplaySource(
   const newerReplay = getOne<{ found: number }>(
     `SELECT 1 AS found FROM outbox_events
       WHERE target_webhook_id = ?
-        AND replay_of_delivery_id = ?
+        AND (
+          replay_original_event_id = ? OR
+          (replay_original_event_id IS NULL AND replay_of_delivery_id = ?)
+        )
         AND rowid > ?
       LIMIT 1`,
     source.webhook_id,
+    root.originalEventId,
     root.id,
     source.event_sequence,
   );
@@ -403,8 +422,9 @@ function resolveReplayRoot(
   workspaceId: string,
   webhookId: string,
   deliveryId: string,
-): ReplayRootRow {
+): ResolvedReplayRoot {
   const visited = new Set<string>();
+  let originalEventId: string | null = null;
   let currentDeliveryId = deliveryId;
   for (let depth = 0; depth < 100; depth += 1) {
     if (visited.has(currentDeliveryId)) {
@@ -413,7 +433,8 @@ function resolveReplayRoot(
     visited.add(currentDeliveryId);
     const row = getOne<ReplayRootRow>(
       `SELECT wd.id, wd.webhook_id, wd.event_id, wd.request_body,
-              oe.replay_of_delivery_id, oe.type, oe.aggregate_type,
+              oe.replay_of_delivery_id, oe.replay_original_event_id,
+              oe.type, oe.aggregate_type,
               oe.aggregate_id, oe.payload_json
          FROM webhook_deliveries wd
          JOIN webhooks w ON w.id = wd.webhook_id
@@ -427,7 +448,15 @@ function resolveReplayRoot(
     if (!row) {
       return replayConflict("The original webhook event is no longer available.");
     }
-    if (!row.replay_of_delivery_id) return row;
+    if (row.replay_original_event_id) {
+      if (originalEventId && originalEventId !== row.replay_original_event_id) {
+        return replayConflict("The webhook replay chain has conflicting event identities.");
+      }
+      originalEventId = row.replay_original_event_id;
+    }
+    if (!row.replay_of_delivery_id) {
+      return { ...row, originalEventId: originalEventId ?? row.event_id };
+    }
     currentDeliveryId = row.replay_of_delivery_id;
   }
   return replayConflict("The webhook replay chain is too deep.");
@@ -451,11 +480,14 @@ export function queueWebhookDeliveryReplay(
       .prepare(
         `SELECT 1 AS found FROM outbox_events
           WHERE target_webhook_id = ?
-            AND replay_of_delivery_id = ?
+            AND (
+              replay_original_event_id = ? OR
+              (replay_original_event_id IS NULL AND replay_of_delivery_id = ?)
+            )
             AND processed_at IS NULL
           LIMIT 1`,
       )
-      .get(webhookId, root.id);
+      .get(webhookId, root.originalEventId, root.id);
     if (activeReplay) {
       throw new ConflictError("A replay for this delivery is already queued.");
     }
@@ -464,8 +496,9 @@ export function queueWebhookDeliveryReplay(
       .prepare(
         `INSERT INTO outbox_events(
           id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
-          available_at, attempts, target_webhook_id, replay_of_delivery_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+          available_at, attempts, target_webhook_id, replay_of_delivery_id,
+          replay_original_event_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       )
       .run(
         eventId,
@@ -477,6 +510,7 @@ export function queueWebhookDeliveryReplay(
         now,
         webhookId,
         root.id,
+        root.originalEventId,
         now,
       );
     database
@@ -491,6 +525,7 @@ export function queueWebhookDeliveryReplay(
       rootDeliveryId: root.id,
       replayDeliveryId,
       eventId,
+      originalEventId: root.originalEventId,
     };
     recordActivity(database, {
       workspaceId,
@@ -513,6 +548,7 @@ export function queueWebhookDeliveryReplay(
     return {
       deliveryId: replayDeliveryId,
       eventId,
+      originalEventId: root.originalEventId,
       rootDeliveryId: root.id,
       queuedAt: now,
     };
