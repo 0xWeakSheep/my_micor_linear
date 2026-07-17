@@ -112,6 +112,10 @@ API Key 固定绑定创建它的用户和工作区，URL 或 Body 不能切换�
 
 常见错误码为 `authentication_required` / `invalid_token`（401）、`insufficient_scope` / `forbidden`（403）、`not_found`（404）、`conflict`（409）、`invalid_json` / `invalid_pagination` / `validation_error`（400）和 `internal_error`（500）。所有 API 响应均带 `Cache-Control: no-store`；有效密钥的 `last_used_at` 会在鉴权时更新。
 
+## Webhook 接收协议
+
+Webhook 使用 `X-Micro-Linear-Signature: sha256=<hex>` 对原始请求 Body 做 HMAC-SHA256 签名。接收端必须先按原始字节校验签名，再解析 JSON；`Idempotency-Key` 与 `X-Micro-Linear-Delivery` 在自动重试和管理员手动重放之间保持不变，可用于幂等去重。完整 Header、Body、响应状态与重放约定见 [`docs/WEBHOOKS.md`](docs/WEBHOOKS.md)。
+
 ## 架构
 
 - Next.js 16 App Router、React 19、TypeScript strict
