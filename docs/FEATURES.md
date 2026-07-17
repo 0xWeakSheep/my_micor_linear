@@ -304,7 +304,7 @@
 - [ ] API 写入与 Web UI 使用相同授权、校验和 Activity 逻辑。
 - [ ] 支持 Issue、Comment、Attachment、Document、Project、Project Update、Cycle、Label 和 User Webhook。
 - [ ] Webhook 包含事件类型、当前数据、变更前值和稳定事件 ID。
-- [ ] 支持签名校验、重试、投递日志和手动重放。
+- [x] 支持签名校验、重试、投递日志和手动重放。
 - [ ] 支持 CSV 导入 Issue，并映射用户、状态、Label、Estimate、Due Date、Project 和关系。
 - [ ] 支持工作区、当前 View、Project 和 Initiative CSV 导出。
 - [ ] 支持导入预检、错误报告和可回滚的批次记录。
