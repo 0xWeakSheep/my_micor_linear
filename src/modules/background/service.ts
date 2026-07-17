@@ -70,6 +70,7 @@ interface OutboxRow {
   target_webhook_id: string | null;
   replay_of_delivery_id: string | null;
   replay_original_event_id: string | null;
+  lock_token: string;
 }
 
 interface WebhookRow {
@@ -997,33 +998,101 @@ export function processMaintenance(
   }
 }
 
-function claimOutboxEvents(
+class OutboxLeaseLostError extends Error {
+  constructor(eventId: string) {
+    super(`Outbox lease lost for ${eventId}.`);
+    this.name = "OutboxLeaseLostError";
+  }
+}
+
+function holdsOutboxLease(database: Database, event: OutboxRow): boolean {
+  return Boolean(
+    database
+      .prepare(
+        `SELECT 1 FROM outbox_events
+          WHERE id = ? AND lock_token = ? AND processed_at IS NULL`,
+      )
+      .get(event.id, event.lock_token),
+  );
+}
+
+function assertOutboxLease(database: Database, event: OutboxRow): void {
+  if (!holdsOutboxLease(database, event)) {
+    throw new OutboxLeaseLostError(event.id);
+  }
+}
+
+function renewOutboxLease(database: Database, event: OutboxRow, now: Date): void {
+  const renewed = database
+    .prepare(
+      `UPDATE outbox_events
+          SET locked_at = ?
+        WHERE id = ? AND lock_token = ? AND processed_at IS NULL`,
+    )
+    .run(now.toISOString(), event.id, event.lock_token);
+  if (!renewed.changes) throw new OutboxLeaseLostError(event.id);
+}
+
+const OUTBOX_LEASE_PREDICATE = `EXISTS (
+  SELECT 1 FROM outbox_events leased_event
+   WHERE leased_event.id = ?
+     AND leased_event.lock_token = ?
+     AND leased_event.processed_at IS NULL
+)`;
+
+function requireLeaseMutation(
   database: Database,
-  now: Date,
-  limit: number,
+  event: OutboxRow,
+  changes: number | bigint,
+  missingResourceMessage: string,
+): void {
+  if (changes) return;
+  assertOutboxLease(database, event);
+  throw new Error(missingResourceMessage);
+}
+
+function claimNextOutboxEvent(
+  database: Database,
+  availableAt: Date,
+  leaseNow: Date,
   lockTimeoutMs: number,
-): OutboxRow[] {
-  const nowIso = now.toISOString();
-  const staleBefore = new Date(now.getTime() - lockTimeoutMs).toISOString();
+  excludedIds: readonly string[],
+): OutboxRow | undefined {
+  const availableAtIso = availableAt.toISOString();
+  const leaseNowIso = leaseNow.toISOString();
+  const staleBefore = new Date(leaseNow.getTime() - lockTimeoutMs).toISOString();
   const token = createId("worker");
   return immediateTransaction(database, () => {
-    const ids = database
+    const exclusion = excludedIds.length
+      ? `AND id NOT IN (${excludedIds.map(() => "?").join(", ")})`
+      : "";
+    const candidate = database
       .prepare(
         `SELECT id FROM outbox_events
           WHERE processed_at IS NULL
             AND available_at <= ?
             AND (locked_at IS NULL OR locked_at <= ?)
+            ${exclusion}
           ORDER BY available_at, created_at, id
-          LIMIT ?`,
+          LIMIT 1`,
       )
-      .all(nowIso, staleBefore, limit) as Array<{ id: string }>;
-    const claim = database.prepare(
-      "UPDATE outbox_events SET locked_at = ?, lock_token = ? WHERE id = ?",
-    );
-    for (const row of ids) claim.run(nowIso, token, row.id);
+      .get(availableAtIso, staleBefore, ...excludedIds) as { id: string } | undefined;
+    if (!candidate) return undefined;
+
+    const claimed = database
+      .prepare(
+        `UPDATE outbox_events
+            SET locked_at = ?, lock_token = ?
+          WHERE id = ?
+            AND processed_at IS NULL
+            AND available_at <= ?
+            AND (locked_at IS NULL OR locked_at <= ?)`,
+      )
+      .run(leaseNowIso, token, candidate.id, availableAtIso, staleBefore);
+    if (!claimed.changes) return undefined;
     return database
-      .prepare("SELECT * FROM outbox_events WHERE lock_token = ? ORDER BY available_at, id")
-      .all(token) as unknown as OutboxRow[];
+      .prepare("SELECT * FROM outbox_events WHERE id = ? AND lock_token = ?")
+      .get(candidate.id, token) as unknown as OutboxRow | undefined;
   });
 }
 
@@ -1183,6 +1252,7 @@ function recordInvalidReplay(
   current: DeliveryRow | undefined,
   now: Date,
 ): TargetResult {
+  assertOutboxLease(database, event);
   const error =
     "PERMANENT: Replay source delivery is unavailable or belongs to a different webhook.";
   let delivery = current;
@@ -1192,19 +1262,34 @@ function recordInvalidReplay(
       .prepare(
         `INSERT OR IGNORE INTO webhook_deliveries(
           id, webhook_id, event_id, request_body, attempt, created_at
-        ) VALUES (?, ?, ?, '', 1, ?)`,
+        ) SELECT ?, ?, ?, '', 1, ?
+           WHERE ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(deliveryId, webhook.id, event.id, now.toISOString());
+      .run(
+        deliveryId,
+        webhook.id,
+        event.id,
+        now.toISOString(),
+        event.id,
+        event.lock_token,
+      );
+    assertOutboxLease(database, event);
     delivery = latestDelivery(database, webhook.id, event.id);
   }
   if (!delivery) throw new Error("Unable to record invalid webhook replay.");
-  database
+  const updated = database
     .prepare(
       `UPDATE webhook_deliveries
           SET response_status = 0, response_body = ?, next_attempt_at = NULL
-        WHERE id = ?`,
+        WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
     )
-    .run(error, delivery.id);
+    .run(error, delivery.id, event.id, event.lock_token);
+  requireLeaseMutation(
+    database,
+    event,
+    updated.changes,
+    "Unable to record invalid webhook replay.",
+  );
   return { status: "terminal", error };
 }
 
@@ -1223,10 +1308,12 @@ async function deliverWebhookTarget(
     >
   > & {
     now: Date;
+    leaseNow: () => Date;
     fetchImplementation: typeof fetch;
     resolveHost?: ResolveHost;
   },
 ): Promise<TargetResult> {
+  renewOutboxLease(database, event, options.leaseNow());
   const current = latestDelivery(database, webhook.id, event.id);
   if (current?.delivered_at) return { status: "delivered" };
   if (current && isTerminalDelivery(current, options.maxAttempts)) {
@@ -1277,9 +1364,20 @@ async function deliverWebhookTarget(
       .prepare(
         `INSERT OR IGNORE INTO webhook_deliveries(
           id, webhook_id, event_id, request_body, attempt, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        ) SELECT ?, ?, ?, ?, ?, ?
+           WHERE ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(deliveryId, webhook.id, event.id, body, attempt, options.now.toISOString());
+      .run(
+        deliveryId,
+        webhook.id,
+        event.id,
+        body,
+        attempt,
+        options.now.toISOString(),
+        event.id,
+        event.lock_token,
+      );
+    assertOutboxLease(database, event);
     delivery = database
       .prepare(
         `SELECT * FROM webhook_deliveries
@@ -1287,20 +1385,35 @@ async function deliverWebhookTarget(
       )
       .get(webhook.id, event.id, attempt) as unknown as DeliveryRow;
   } else if (delivery.request_body !== body) {
-    database
-      .prepare("UPDATE webhook_deliveries SET request_body = ? WHERE id = ?")
-      .run(body, delivery.id);
+    const updated = database
+      .prepare(
+        `UPDATE webhook_deliveries SET request_body = ?
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
+      )
+      .run(body, delivery.id, event.id, event.lock_token);
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to update webhook request body.",
+    );
   }
 
   const recordPermanentFailure = (message: string, responseStatus = 0): TargetResult => {
     const error = `PERMANENT: ${message}`.slice(0, 4_096);
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = ?, response_body = ?, next_attempt_at = NULL
-          WHERE id = ?`,
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(responseStatus, error, delivery!.id);
+      .run(responseStatus, error, delivery!.id, event.id, event.lock_token);
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to record permanent webhook failure.",
+    );
     return { status: "terminal", error };
   };
 
@@ -1318,13 +1431,25 @@ async function deliverWebhookTarget(
     const nextAttemptAt = new Date(
       options.now.getTime() + retryDelayMs(attempt, options.baseRetryMs, options.maxRetryMs),
     ).toISOString();
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = 0, response_body = ?, next_attempt_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(message.slice(0, 4_096), attempt >= options.maxAttempts ? null : nextAttemptAt, delivery.id);
+      .run(
+        message.slice(0, 4_096),
+        attempt >= options.maxAttempts ? null : nextAttemptAt,
+        delivery.id,
+        event.id,
+        event.lock_token,
+      );
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to record webhook URL validation failure.",
+    );
     return attempt >= options.maxAttempts
       ? { status: "terminal", error: message }
       : { status: "pending", nextAttemptAt, error: message };
@@ -1347,18 +1472,34 @@ async function deliverWebhookTarget(
       options.now.getTime() + retryDelayMs(attempt, options.baseRetryMs, options.maxRetryMs),
     ).toISOString();
     const exhausted = attempt >= options.maxAttempts;
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = 0, response_body = ?, next_attempt_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(message.slice(0, 4_096), exhausted ? null : nextAttemptAt, delivery.id);
+      .run(
+        message.slice(0, 4_096),
+        exhausted ? null : nextAttemptAt,
+        delivery.id,
+        event.id,
+        event.lock_token,
+      );
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to record webhook signing failure.",
+    );
     return exhausted
       ? { status: "terminal", error: message }
       : { status: "pending", nextAttemptAt, error: message };
   }
   const signature = createHmac("sha256", signingSecret).update(body).digest("hex");
+  // URL resolution may take long enough for another worker to reclaim the event.
+  // Renew immediately before the external side effect; every response write below
+  // is additionally fenced by this event's unique lock token.
+  renewOutboxLease(database, event, options.leaseNow());
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.requestTimeoutMs);
   try {
@@ -1382,14 +1523,27 @@ async function deliverWebhookTarget(
     });
     const responseBody = await limitedResponseBody(response);
     if (response.ok) {
-      database
+      const updated = database
         .prepare(
           `UPDATE webhook_deliveries
               SET response_status = ?, response_body = ?, next_attempt_at = NULL,
                   delivered_at = ?
-            WHERE id = ?`,
+            WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
         )
-        .run(response.status, responseBody, options.now.toISOString(), delivery.id);
+        .run(
+          response.status,
+          responseBody,
+          options.now.toISOString(),
+          delivery.id,
+          event.id,
+          event.lock_token,
+        );
+      requireLeaseMutation(
+        database,
+        event,
+        updated.changes,
+        "Unable to record successful webhook delivery.",
+      );
       return { status: "delivered" };
     }
 
@@ -1412,18 +1566,26 @@ async function deliverWebhookTarget(
     );
     const nextAttemptAt = new Date(options.now.getTime() + delay).toISOString();
     const exhausted = attempt >= options.maxAttempts;
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = ?, response_body = ?, next_attempt_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
       )
       .run(
         response.status,
         responseBody,
         exhausted ? null : nextAttemptAt,
         delivery.id,
+        event.id,
+        event.lock_token,
       );
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to record webhook response failure.",
+    );
     return exhausted
       ? { status: "terminal", error: `HTTP ${response.status}: ${responseBody}` }
       : {
@@ -1432,18 +1594,31 @@ async function deliverWebhookTarget(
           error: `HTTP ${response.status}: ${responseBody}`,
         };
   } catch (error) {
+    if (error instanceof OutboxLeaseLostError) throw error;
     const message = error instanceof Error ? error.message : "Webhook request failed.";
     const nextAttemptAt = new Date(
       options.now.getTime() + retryDelayMs(attempt, options.baseRetryMs, options.maxRetryMs),
     ).toISOString();
     const exhausted = attempt >= options.maxAttempts;
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = 0, response_body = ?, next_attempt_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(message.slice(0, 4_096), exhausted ? null : nextAttemptAt, delivery.id);
+      .run(
+        message.slice(0, 4_096),
+        exhausted ? null : nextAttemptAt,
+        delivery.id,
+        event.id,
+        event.lock_token,
+      );
+    requireLeaseMutation(
+      database,
+      event,
+      updated.changes,
+      "Unable to record webhook request failure.",
+    );
     return exhausted
       ? { status: "terminal", error: message }
       : { status: "pending", nextAttemptAt, error: message };
@@ -1462,6 +1637,7 @@ async function processOutboxEvent(
   retryScheduled: number;
   terminalFailures: number;
 }> {
+  renewOutboxLease(database, event, options.leaseNow());
   const hooks = !event.workspace_id
     ? []
     : event.target_webhook_id
@@ -1479,13 +1655,21 @@ async function processOutboxEvent(
   const outcomes: TargetResult[] = [];
   if (event.target_webhook_id && hooks.length === 0) {
     const error = "PERMANENT: Webhook is inactive or unavailable.";
-    database
+    const updated = database
       .prepare(
         `UPDATE webhook_deliveries
             SET response_status = 0, response_body = ?, next_attempt_at = NULL
-          WHERE webhook_id = ? AND event_id = ? AND delivered_at IS NULL`,
+          WHERE webhook_id = ? AND event_id = ? AND delivered_at IS NULL
+            AND ${OUTBOX_LEASE_PREDICATE}`,
       )
-      .run(error, event.target_webhook_id, event.id);
+      .run(
+        error,
+        event.target_webhook_id,
+        event.id,
+        event.id,
+        event.lock_token,
+      );
+    if (!updated.changes) assertOutboxLease(database, event);
     outcomes.push({ status: "terminal", error });
   }
   for (const webhook of hooks) {
@@ -1497,18 +1681,20 @@ async function processOutboxEvent(
   const delivered = outcomes.filter((outcome) => outcome.status === "delivered").length;
   const errors = outcomes.flatMap((outcome) => (outcome.error ? [outcome.error] : []));
   if (pending.length === 0) {
-    database
+    const completed = database
       .prepare(
         `UPDATE outbox_events
             SET processed_at = ?, attempts = attempts + 1, locked_at = NULL,
                 lock_token = NULL, last_error = ?
-          WHERE id = ?`,
+          WHERE id = ? AND lock_token = ? AND processed_at IS NULL`,
       )
       .run(
         options.now.toISOString(),
         terminal.length ? errors.join("; ").slice(0, 4_096) : null,
         event.id,
+        event.lock_token,
       );
+    if (!completed.changes) throw new OutboxLeaseLostError(event.id);
     return {
       processed: true,
       delivered,
@@ -1520,14 +1706,20 @@ async function processOutboxEvent(
   const nextAttemptAt = pending
     .map((outcome) => outcome.nextAttemptAt!)
     .sort()[0]!;
-  database
+  const scheduled = database
     .prepare(
       `UPDATE outbox_events
           SET available_at = ?, attempts = attempts + 1, locked_at = NULL,
               lock_token = NULL, last_error = ?
-        WHERE id = ?`,
+        WHERE id = ? AND lock_token = ? AND processed_at IS NULL`,
     )
-    .run(nextAttemptAt, errors.join("; ").slice(0, 4_096), event.id);
+    .run(
+      nextAttemptAt,
+      errors.join("; ").slice(0, 4_096),
+      event.id,
+      event.lock_token,
+    );
+  if (!scheduled.changes) throw new OutboxLeaseLostError(event.id);
   return {
     processed: false,
     delivered,
@@ -1540,16 +1732,25 @@ export async function deliverOutboxWebhooks(
   database: Database,
   options: WebhookJobOptions = {},
 ): Promise<WebhookJobResult> {
-  const now = options.now ?? new Date();
   const limit = Math.max(1, Math.min(options.limit ?? 100, 1_000));
   const maxAttempts = Math.max(1, Math.min(options.maxAttempts ?? 8, 25));
   const baseRetryMs = Math.max(1_000, options.baseRetryMs ?? 30_000);
   const maxRetryMs = Math.max(baseRetryMs, options.maxRetryMs ?? 86_400_000);
-  const lockTimeoutMs = Math.max(10_000, options.lockTimeoutMs ?? 300_000);
   const requestTimeoutMs = Math.max(500, options.requestTimeoutMs ?? 10_000);
-  const events = claimOutboxEvents(database, now, limit, lockTimeoutMs);
+  // A cooperative request should abort before its lease can expire. Fetch
+  // implementations that ignore AbortSignal are still protected by token fencing.
+  const lockTimeoutMs = Math.max(
+    10_000,
+    options.lockTimeoutMs ?? 300_000,
+    requestTimeoutMs + 1_000,
+  );
+  const fixedNow = options.now;
+  // Scheduling can use an injected timestamp, but lease age must follow wall
+  // time so long-running production batches do not backdate later claims.
+  const leaseNow = (): Date => new Date();
+  const claimedIds: string[] = [];
   const result: WebhookJobResult = {
-    claimedEvents: events.length,
+    claimedEvents: 0,
     processedEvents: 0,
     delivered: 0,
     retryScheduled: 0,
@@ -1557,10 +1758,23 @@ export async function deliverOutboxWebhooks(
     errors: [],
   };
 
-  for (const event of events) {
+  while (claimedIds.length < limit) {
+    const eventNow = fixedNow ?? new Date();
+    const event = claimNextOutboxEvent(
+      database,
+      eventNow,
+      leaseNow(),
+      lockTimeoutMs,
+      claimedIds,
+    );
+    if (!event) break;
+    claimedIds.push(event.id);
+    result.claimedEvents += 1;
+
     try {
       const processed = await processOutboxEvent(database, event, {
-        now,
+        now: eventNow,
+        leaseNow,
         maxAttempts,
         baseRetryMs,
         maxRetryMs,
@@ -1580,19 +1794,22 @@ export async function deliverOutboxWebhooks(
       result.retryScheduled += processed.retryScheduled;
       result.terminalFailures += processed.terminalFailures;
     } catch (error) {
+      if (error instanceof OutboxLeaseLostError || !holdsOutboxLease(database, event)) {
+        continue;
+      }
       const message = error instanceof Error ? error.message : "unknown outbox error";
-      result.errors.push(`${event.id}: ${message}`);
       const nextAttemptAt = new Date(
-        now.getTime() + retryDelayMs(event.attempts + 1, baseRetryMs, maxRetryMs),
+        eventNow.getTime() + retryDelayMs(event.attempts + 1, baseRetryMs, maxRetryMs),
       ).toISOString();
-      database
+      const scheduled = database
         .prepare(
           `UPDATE outbox_events
               SET available_at = ?, attempts = attempts + 1, locked_at = NULL,
                   lock_token = NULL, last_error = ?
-            WHERE id = ?`,
+            WHERE id = ? AND lock_token = ? AND processed_at IS NULL`,
         )
-        .run(nextAttemptAt, message.slice(0, 4_096), event.id);
+        .run(nextAttemptAt, message.slice(0, 4_096), event.id, event.lock_token);
+      if (scheduled.changes) result.errors.push(`${event.id}: ${message}`);
     }
   }
   return result;

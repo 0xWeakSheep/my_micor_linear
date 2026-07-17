@@ -79,6 +79,7 @@ function seedWorkspace(database: DatabaseSync): void {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   for (const database of databases.splice(0)) database.close();
 });
@@ -329,6 +330,169 @@ describe("webhook URL safety", () => {
 });
 
 describe("outbox webhook delivery", () => {
+  it("processes every event in a batch while claiming them one at a time", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    database
+      .prepare(
+        `INSERT INTO webhooks(
+          id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+          events_json, is_active, created_by_id, created_at, updated_at
+        ) VALUES (
+          'webhook_batch', 'workspace_1', 'Batch hook',
+          'https://batch.example.com/hook', 'key', ?, '["issue.created"]', 1,
+          'user_1', ?, ?
+        )`,
+      )
+      .run(sealWebhookSecret("batch-secret"), CREATED_AT, CREATED_AT);
+    const insertEvent = database.prepare(
+      `INSERT INTO outbox_events(
+        id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+        available_at, attempts, created_at
+      ) VALUES (?, 'workspace_1', 'issue.created', 'issue', ?, '{}', ?, 0, ?)`,
+    );
+    for (let index = 1; index <= 3; index += 1) {
+      insertEvent.run(`event_batch_${index}`, `issue_${index}`, CREATED_AT, CREATED_AT);
+    }
+
+    const requestedEvents: string[] = [];
+    const result = await deliverOutboxWebhooks(database, {
+      now: new Date(CREATED_AT),
+      limit: 3,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImplementation: async (_input, init) => {
+        requestedEvents.push(JSON.parse(String(init?.body)).id as string);
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    expect(result).toMatchObject({
+      claimedEvents: 3,
+      processedEvents: 3,
+      delivered: 3,
+      errors: [],
+    });
+    expect(requestedEvents).toEqual([
+      "event_batch_1",
+      "event_batch_2",
+      "event_batch_3",
+    ]);
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count FROM outbox_events
+            WHERE processed_at = ? AND locked_at IS NULL AND lock_token IS NULL`,
+        )
+        .get(CREATED_AT),
+    ).toEqual({ count: 3 });
+  });
+
+  it("prevents an expired worker from overwriting its successor's delivery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-11T00:00:00.000Z"));
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    database
+      .prepare(
+        `INSERT INTO webhooks(
+          id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+          events_json, is_active, created_by_id, created_at, updated_at
+        ) VALUES (
+          'webhook_fenced', 'workspace_1', 'Fenced hook',
+          'https://fenced.example.com/hook', 'key', ?, '["issue.created"]', 1,
+          'user_1', ?, ?
+        )`,
+      )
+      .run(sealWebhookSecret("fenced-secret"), CREATED_AT, CREATED_AT);
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, created_at
+        ) VALUES (
+          'event_fenced', 'workspace_1', 'issue.created', 'issue', 'issue_1', '{}',
+          ?, 0, ?
+        )`,
+      )
+      .run(CREATED_AT, CREATED_AT);
+
+    let releaseFirstRequest!: (response: Response) => void;
+    let markFirstRequestStarted!: () => void;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      markFirstRequestStarted = resolve;
+    });
+    const firstFetch: typeof fetch = async () =>
+      new Promise<Response>((resolve) => {
+        releaseFirstRequest = resolve;
+        markFirstRequestStarted();
+      });
+    const resolveHost = async () => [{ address: "93.184.216.34", family: 4 }];
+    const firstWorker = deliverOutboxWebhooks(database, {
+      now: new Date("2026-07-11T00:00:00.000Z"),
+      lockTimeoutMs: 10_000,
+      requestTimeoutMs: 500,
+      resolveHost,
+      fetchImplementation: firstFetch,
+    });
+    await firstRequestStarted;
+
+    vi.setSystemTime(new Date("2026-07-11T00:00:10.000Z"));
+    const successor = await deliverOutboxWebhooks(database, {
+      now: new Date("2026-07-11T00:00:10.000Z"),
+      lockTimeoutMs: 10_000,
+      requestTimeoutMs: 500,
+      resolveHost,
+      fetchImplementation: async () =>
+        new Response("successor accepted", { status: 202 }),
+    });
+    expect(successor).toMatchObject({
+      claimedEvents: 1,
+      processedEvents: 1,
+      delivered: 1,
+      errors: [],
+    });
+
+    releaseFirstRequest(new Response("stale worker failure", { status: 503 }));
+    const expired = await firstWorker;
+    expect(expired).toMatchObject({
+      claimedEvents: 1,
+      processedEvents: 0,
+      delivered: 0,
+      retryScheduled: 0,
+      errors: [],
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT response_status AS responseStatus, response_body AS responseBody,
+                  delivered_at AS deliveredAt, next_attempt_at AS nextAttemptAt
+             FROM webhook_deliveries
+            WHERE webhook_id = 'webhook_fenced' AND event_id = 'event_fenced'`,
+        )
+        .get(),
+    ).toEqual({
+      responseStatus: 202,
+      responseBody: "successor accepted",
+      deliveredAt: "2026-07-11T00:00:10.000Z",
+      nextAttemptAt: null,
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT attempts, processed_at AS processedAt, last_error AS lastError,
+                  locked_at AS lockedAt, lock_token AS lockToken
+             FROM outbox_events WHERE id = 'event_fenced'`,
+        )
+        .get(),
+    ).toEqual({
+      attempts: 1,
+      processedAt: "2026-07-11T00:00:10.000Z",
+      lastError: null,
+      lockedAt: null,
+      lockToken: null,
+    });
+  });
+
   it("delivers a targeted event only to the requested active webhook", async () => {
     const database = createTestDatabase();
     seedWorkspace(database);
