@@ -145,6 +145,7 @@ export interface WebhookJobResult {
   delivered: number;
   retryScheduled: number;
   terminalFailures: number;
+  leaseLostEvents: number;
   errors: string[];
 }
 
@@ -1241,6 +1242,7 @@ async function limitedResponseBody(response: Response, maximumBytes = 4_096): Pr
 
 interface TargetResult {
   status: "delivered" | "pending" | "terminal";
+  recorded: boolean;
   nextAttemptAt?: string;
   error?: string;
 }
@@ -1290,7 +1292,7 @@ function recordInvalidReplay(
     updated.changes,
     "Unable to record invalid webhook replay.",
   );
-  return { status: "terminal", error };
+  return { status: "terminal", recorded: true, error };
 }
 
 async function deliverWebhookTarget(
@@ -1315,9 +1317,13 @@ async function deliverWebhookTarget(
 ): Promise<TargetResult> {
   renewOutboxLease(database, event, options.leaseNow());
   const current = latestDelivery(database, webhook.id, event.id);
-  if (current?.delivered_at) return { status: "delivered" };
+  if (current?.delivered_at) return { status: "delivered", recorded: false };
   if (current && isTerminalDelivery(current, options.maxAttempts)) {
-    return { status: "terminal", error: current.response_body ?? "Delivery exhausted retries." };
+    return {
+      status: "terminal",
+      recorded: false,
+      error: current.response_body ?? "Delivery exhausted retries.",
+    };
   }
 
   let replaySource: ReplaySource | null = null;
@@ -1341,7 +1347,11 @@ async function deliverWebhookTarget(
     replaySource = resolved;
   }
   if (current?.next_attempt_at && current.next_attempt_at > options.now.toISOString()) {
-    return { status: "pending", nextAttemptAt: current.next_attempt_at };
+    return {
+      status: "pending",
+      recorded: false,
+      nextAttemptAt: current.next_attempt_at,
+    };
   }
 
   const reusingIncomplete =
@@ -1351,7 +1361,11 @@ async function deliverWebhookTarget(
     current.next_attempt_at === null;
   const attempt = reusingIncomplete ? current.attempt : (current?.attempt ?? 0) + 1;
   if (attempt > options.maxAttempts) {
-    return { status: "terminal", error: "Delivery exhausted retries." };
+    return {
+      status: "terminal",
+      recorded: false,
+      error: "Delivery exhausted retries.",
+    };
   }
 
   const body = replaySource
@@ -1414,7 +1428,7 @@ async function deliverWebhookTarget(
       updated.changes,
       "Unable to record permanent webhook failure.",
     );
-    return { status: "terminal", error };
+    return { status: "terminal", recorded: true, error };
   };
 
   let url: URL;
@@ -1451,8 +1465,8 @@ async function deliverWebhookTarget(
       "Unable to record webhook URL validation failure.",
     );
     return attempt >= options.maxAttempts
-      ? { status: "terminal", error: message }
-      : { status: "pending", nextAttemptAt, error: message };
+      ? { status: "terminal", recorded: true, error: message }
+      : { status: "pending", recorded: true, nextAttemptAt, error: message };
   }
 
   const idempotencyKey = `${webhook.id}:${replaySource?.eventId ?? event.id}`;
@@ -1492,8 +1506,8 @@ async function deliverWebhookTarget(
       "Unable to record webhook signing failure.",
     );
     return exhausted
-      ? { status: "terminal", error: message }
-      : { status: "pending", nextAttemptAt, error: message };
+      ? { status: "terminal", recorded: true, error: message }
+      : { status: "pending", recorded: true, nextAttemptAt, error: message };
   }
   const signature = createHmac("sha256", signingSecret).update(body).digest("hex");
   // URL resolution may take long enough for another worker to reclaim the event.
@@ -1544,7 +1558,7 @@ async function deliverWebhookTarget(
         updated.changes,
         "Unable to record successful webhook delivery.",
       );
-      return { status: "delivered" };
+      return { status: "delivered", recorded: true };
     }
 
     const retryable =
@@ -1587,9 +1601,14 @@ async function deliverWebhookTarget(
       "Unable to record webhook response failure.",
     );
     return exhausted
-      ? { status: "terminal", error: `HTTP ${response.status}: ${responseBody}` }
+      ? {
+          status: "terminal",
+          recorded: true,
+          error: `HTTP ${response.status}: ${responseBody}`,
+        }
       : {
           status: "pending",
+          recorded: true,
           nextAttemptAt,
           error: `HTTP ${response.status}: ${responseBody}`,
         };
@@ -1620,8 +1639,8 @@ async function deliverWebhookTarget(
       "Unable to record webhook request failure.",
     );
     return exhausted
-      ? { status: "terminal", error: message }
-      : { status: "pending", nextAttemptAt, error: message };
+      ? { status: "terminal", recorded: true, error: message }
+      : { status: "pending", recorded: true, nextAttemptAt, error: message };
   } finally {
     clearTimeout(timeout);
   }
@@ -1670,7 +1689,7 @@ async function processOutboxEvent(
         event.lock_token,
       );
     if (!updated.changes) assertOutboxLease(database, event);
-    outcomes.push({ status: "terminal", error });
+    outcomes.push({ status: "terminal", recorded: true, error });
   }
   for (const webhook of hooks) {
     outcomes.push(await deliverWebhookTarget(database, event, webhook, options));
@@ -1678,7 +1697,9 @@ async function processOutboxEvent(
 
   const pending = outcomes.filter((outcome) => outcome.status === "pending");
   const terminal = outcomes.filter((outcome) => outcome.status === "terminal");
-  const delivered = outcomes.filter((outcome) => outcome.status === "delivered").length;
+  const delivered = outcomes.filter(
+    (outcome) => outcome.status === "delivered" && outcome.recorded,
+  ).length;
   const errors = outcomes.flatMap((outcome) => (outcome.error ? [outcome.error] : []));
   if (pending.length === 0) {
     const completed = database
@@ -1699,7 +1720,7 @@ async function processOutboxEvent(
       processed: true,
       delivered,
       retryScheduled: 0,
-      terminalFailures: terminal.length,
+      terminalFailures: terminal.filter((outcome) => outcome.recorded).length,
     };
   }
 
@@ -1723,8 +1744,8 @@ async function processOutboxEvent(
   return {
     processed: false,
     delivered,
-    retryScheduled: pending.length,
-    terminalFailures: terminal.length,
+    retryScheduled: pending.filter((outcome) => outcome.recorded).length,
+    terminalFailures: terminal.filter((outcome) => outcome.recorded).length,
   };
 }
 
@@ -1755,6 +1776,7 @@ export async function deliverOutboxWebhooks(
     delivered: 0,
     retryScheduled: 0,
     terminalFailures: 0,
+    leaseLostEvents: 0,
     errors: [],
   };
 
@@ -1795,6 +1817,7 @@ export async function deliverOutboxWebhooks(
       result.terminalFailures += processed.terminalFailures;
     } catch (error) {
       if (error instanceof OutboxLeaseLostError || !holdsOutboxLease(database, event)) {
+        result.leaseLostEvents += 1;
         continue;
       }
       const message = error instanceof Error ? error.message : "unknown outbox error";

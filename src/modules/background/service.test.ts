@@ -459,6 +459,7 @@ describe("outbox webhook delivery", () => {
       processedEvents: 0,
       delivered: 0,
       retryScheduled: 0,
+      leaseLostEvents: 1,
       errors: [],
     });
     expect(
@@ -1010,6 +1011,88 @@ describe("outbox webhook delivery", () => {
     });
     expect(completed.claimedEvents).toBe(0);
     expect(requests).toBe(2);
+  });
+
+  it("counts only delivery outcomes recorded by the current run", async () => {
+    const database = createTestDatabase();
+    seedWorkspace(database);
+    const insertWebhook = database.prepare(
+      `INSERT INTO webhooks(
+        id, workspace_id, name, url, secret_hash, signing_secret_encrypted,
+        events_json, is_active, created_by_id, created_at, updated_at
+      ) VALUES (?, 'workspace_1', ?, ?, 'key', ?, '["issue.created"]', 1,
+        'user_1', ?, ?)`,
+    );
+    for (const [id, name] of [
+      ["webhook_delivered", "delivered"],
+      ["webhook_retrying", "retrying"],
+      ["webhook_terminal", "terminal"],
+    ] as const) {
+      insertWebhook.run(
+        id,
+        name,
+        `https://${name}.example.com/hook`,
+        sealWebhookSecret(`${name}-secret`),
+        CREATED_AT,
+        CREATED_AT,
+      );
+    }
+    database
+      .prepare(
+        `INSERT INTO outbox_events(
+          id, workspace_id, type, aggregate_type, aggregate_id, payload_json,
+          available_at, attempts, created_at
+        ) VALUES (
+          'event_mixed', 'workspace_1', 'issue.created', 'issue', 'issue_1', '{}',
+          '2026-07-11T00:00:00.000Z', 0, ?
+        )`,
+      )
+      .run(CREATED_AT);
+
+    const requestedUrls: string[] = [];
+    const fetchImplementation: typeof fetch = async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("delivered.example.com")) {
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("terminal.example.com")) {
+        return new Response("invalid request", { status: 400 });
+      }
+      return new Response("try again", { status: 503 });
+    };
+    const options = {
+      fetchImplementation,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      baseRetryMs: 1_000,
+    };
+
+    const first = await deliverOutboxWebhooks(database, {
+      ...options,
+      now: new Date("2026-07-11T00:00:00.000Z"),
+    });
+    expect(first).toMatchObject({
+      processedEvents: 0,
+      delivered: 1,
+      retryScheduled: 1,
+      terminalFailures: 1,
+      leaseLostEvents: 0,
+    });
+    expect(requestedUrls).toHaveLength(3);
+
+    const second = await deliverOutboxWebhooks(database, {
+      ...options,
+      now: new Date("2026-07-11T00:00:01.000Z"),
+    });
+    expect(second).toMatchObject({
+      processedEvents: 0,
+      delivered: 0,
+      retryScheduled: 1,
+      terminalFailures: 0,
+      leaseLostEvents: 0,
+    });
+    expect(requestedUrls).toHaveLength(4);
+    expect(requestedUrls.at(-1)).toBe("https://retrying.example.com/hook");
   });
 
   it("records unsafe URLs as terminal without making a request", async () => {
