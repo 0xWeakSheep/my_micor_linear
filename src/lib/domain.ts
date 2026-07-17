@@ -363,6 +363,40 @@ export interface Webhook {
   createdAt: string;
 }
 
+export type WebhookDeliveryStatus = "queued" | "retrying" | "delivered" | "failed";
+
+export type WebhookReplayBlockReason =
+  | "delivery_not_failed"
+  | "event_pending"
+  | "event_unavailable"
+  | "newer_delivery_exists"
+  | "signing_key_unavailable"
+  | "webhook_inactive";
+
+export interface WebhookDeliverySummary {
+  id: Id;
+  webhookId: Id;
+  eventId: Id;
+  eventType: string;
+  resourceType: string | null;
+  resourceId: Id | null;
+  status: WebhookDeliveryStatus;
+  attempt: number;
+  responseStatus: number | null;
+  responseExcerpt: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+  nextAttemptAt: string | null;
+  replayOfDeliveryId: Id | null;
+  canReplay: boolean;
+  replayBlockedReason: WebhookReplayBlockReason | null;
+}
+
+export interface WebhookDeliveryPage {
+  items: WebhookDeliverySummary[];
+  nextCursor: string | null;
+}
+
 export interface BootstrapData {
   currentUser: User;
   currentMembership: Membership;
