@@ -100,4 +100,34 @@ describe("webhook settings", () => {
     );
     expect(mutate).not.toHaveBeenCalled();
   });
+
+  it("opens the selected webhook delivery history", async () => {
+    const mutate = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: { items: [], nextCursor: null },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    workspace.useWorkspace.mockReturnValue({ data: data(), mutate });
+    render(<ApiSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: "投递记录" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "Primary hook 的投递记录" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("暂无投递记录")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workspaces/test/webhooks/hook_main/deliveries?limit=20",
+      { cache: "no-store", signal: expect.any(AbortSignal) },
+    );
+  });
 });

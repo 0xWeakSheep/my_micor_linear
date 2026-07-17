@@ -8,6 +8,7 @@ import { isValidWebhookEndpoint, WEBHOOK_EVENTS } from "@/lib/webhooks";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace/workspace-provider";
+import { WebhookDeliveriesDialog } from "./webhook-deliveries";
 import {
   EmptyRows,
   Field,
@@ -118,6 +119,7 @@ function ApiKeyRow({ apiKey }: { apiKey: ApiKeySummary }) {
 function WebhookRow({ webhook }: { webhook: Webhook }) {
   const { mutate } = useWorkspace();
   const [editing, setEditing] = useState(false);
+  const [deliveriesOpen, setDeliveriesOpen] = useState(false);
   const [draft, setDraft] = useState({ name: webhook.name, url: webhook.url, events: webhook.events, isActive: webhook.isActive });
   const [saving, setSaving] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
@@ -175,12 +177,19 @@ function WebhookRow({ webhook }: { webhook: Webhook }) {
     );
   }
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle text-tertiary"><WebhookIcon size={14} /></span>
-      <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-medium">{webhook.name}</p><Badge variant={!webhook.signingReady ? "warning" : webhook.isActive ? "success" : "neutral"} size="xs">{!webhook.signingReady ? "需配置密钥" : webhook.isActive ? "启用" : "停用"}</Badge></div><p className="truncate text-xs text-tertiary">{webhook.url} · {webhook.events.length} 个事件</p></div>
-      <div className="ml-auto flex items-center gap-1"><Button variant="ghost" size="sm" loading={saving} onClick={() => void rotateSecret()}>{webhook.signingReady ? "轮换密钥" : "配置密钥"}</Button><Button variant="ghost" size="sm" disabled={saving} onClick={startEditing}>编辑</Button><IconButton label={`删除 ${webhook.name}`} icon={<Trash2 size={13} />} variant="ghost" size="icon-sm" className="hover:text-danger" disabled={saving} onClick={() => void remove()} /></div>
-      {revealedSecret ? <div className="basis-full rounded-md border border-warning/30 bg-[var(--warning-soft)] p-2 text-[11px]"><p className="font-medium text-warning">新签名密钥只显示一次</p><div className="mt-1 flex items-center gap-2"><code className="min-w-0 flex-1 overflow-x-auto">{revealedSecret}</code><IconButton label="复制新签名密钥" icon={<Clipboard size={13} />} size="icon-sm" onClick={() => void navigator.clipboard.writeText(revealedSecret)} /></div></div> : null}
-    </div>
+    <>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle text-tertiary"><WebhookIcon size={14} /></span>
+        <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-medium">{webhook.name}</p><Badge variant={!webhook.signingReady ? "warning" : webhook.isActive ? "success" : "neutral"} size="xs">{!webhook.signingReady ? "需配置密钥" : webhook.isActive ? "启用" : "停用"}</Badge></div><p className="truncate text-xs text-tertiary">{webhook.url} · {webhook.events.length} 个事件</p></div>
+        <div className="ml-auto flex items-center gap-1"><Button variant="ghost" size="sm" disabled={saving} onClick={() => setDeliveriesOpen(true)}>投递记录</Button><Button variant="ghost" size="sm" loading={saving} onClick={() => void rotateSecret()}>{webhook.signingReady ? "轮换密钥" : "配置密钥"}</Button><Button variant="ghost" size="sm" disabled={saving} onClick={startEditing}>编辑</Button><IconButton label={`删除 ${webhook.name}`} icon={<Trash2 size={13} />} variant="ghost" size="icon-sm" className="hover:text-danger" disabled={saving} onClick={() => void remove()} /></div>
+        {revealedSecret ? <div className="basis-full rounded-md border border-warning/30 bg-[var(--warning-soft)] p-2 text-[11px]"><p className="font-medium text-warning">新签名密钥只显示一次</p><div className="mt-1 flex items-center gap-2"><code className="min-w-0 flex-1 overflow-x-auto">{revealedSecret}</code><IconButton label="复制新签名密钥" icon={<Clipboard size={13} />} size="icon-sm" onClick={() => void navigator.clipboard.writeText(revealedSecret)} /></div></div> : null}
+      </div>
+      <WebhookDeliveriesDialog
+        webhook={webhook}
+        open={deliveriesOpen}
+        onOpenChange={setDeliveriesOpen}
+      />
+    </>
   );
 }
 
